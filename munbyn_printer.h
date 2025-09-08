@@ -48,6 +48,98 @@ typedef enum {
     MUNBYN_CUT_FULL = 1,
 } munbyn_cut_mode_t;
 
+// International character sets (ESC R n)
+typedef enum {
+    MUNBYN_INTL_USA = 0,
+    MUNBYN_INTL_FRANCE = 1,
+    MUNBYN_INTL_GERMANY = 2,
+    MUNBYN_INTL_UK = 3,
+    MUNBYN_INTL_DENMARK_I = 4,
+    MUNBYN_INTL_SWEDEN = 5,
+    MUNBYN_INTL_ITALY = 6,
+    MUNBYN_INTL_SPAIN_I = 7,
+    MUNBYN_INTL_JAPAN = 8,
+    MUNBYN_INTL_NORWAY = 9,
+    MUNBYN_INTL_DENMARK_II = 10,
+    MUNBYN_INTL_SPAIN_II = 11,
+    MUNBYN_INTL_LATIN_AMERICA = 12,
+    MUNBYN_INTL_KOREA = 13,
+    MUNBYN_INTL_SLOVENIA_CROATIA = 14,
+    MUNBYN_INTL_CHINA = 15
+} munbyn_international_charset_t;
+
+// Code pages for character set selection (ESC t n)
+typedef enum {
+    MUNBYN_CODEPAGE_PC437 = 0,         // PC437(Std.Europe)
+    MUNBYN_CODEPAGE_KATAKANA = 1,      // Katakana
+    MUNBYN_CODEPAGE_PC850 = 2,         // PC850(Multilingual)
+    MUNBYN_CODEPAGE_PC860 = 3,         // PC860(Portugal)
+    MUNBYN_CODEPAGE_PC863 = 4,         // PC863(Canadian)
+    MUNBYN_CODEPAGE_PC865 = 5,         // PC865(Nordic)
+    MUNBYN_CODEPAGE_WEST_EUROPE = 6,   // West Europe
+    MUNBYN_CODEPAGE_GREEK = 7,         // Greek
+    MUNBYN_CODEPAGE_HEBREW = 8,        // Hebrew
+    MUNBYN_CODEPAGE_EAST_EUROPE = 9,   // East Europe
+    MUNBYN_CODEPAGE_IRAN = 10,         // Iran
+    MUNBYN_CODEPAGE_WCP1252 = 11,      // WCP1252
+    MUNBYN_CODEPAGE_PC866 = 12,        // PC866(Cyrillic#2)
+    MUNBYN_CODEPAGE_PC852 = 13,        // PC852(Latin2)
+    MUNBYN_CODEPAGE_PC858 = 14,        // PC858
+    MUNBYN_CODEPAGE_IRAN_II = 15,      // IranII
+    MUNBYN_CODEPAGE_LATVIAN = 16,      // Latvian
+    MUNBYN_CODEPAGE_ARABIC = 17,       // Arabic
+    MUNBYN_CODEPAGE_PT151125 = 18,     // PT151125
+    MUNBYN_CODEPAGE_PC747 = 19,        // PC747
+    MUNBYN_CODEPAGE_WPC1257 = 20,      // WPC1257
+    MUNBYN_CODEPAGE_THAI = 21,         // Thai
+    MUNBYN_CODEPAGE_VIETNAM = 22,      // Vietnam
+    MUNBYN_CODEPAGE_PC864 = 23,        // PC864
+    MUNBYN_CODEPAGE_PC1001 = 24,       // PC1001
+    MUNBYN_CODEPAGE_UIGUR = 25,        // Uigur
+    MUNBYN_CODEPAGE_HEBREW_ALT = 26,   // Hebrew
+    MUNBYN_CODEPAGE_WPC1255 = 27,      // WPC1255(Israel)
+    MUNBYN_CODEPAGE_PC437_ALT = 28,    // PC437(Std.Europe)
+    MUNBYN_CODEPAGE_KATAKANA_ALT = 29, // Katakana
+    MUNBYN_CODEPAGE_PC437_ALT2 = 30,   // PC437(Std.Europe)
+    MUNBYN_CODEPAGE_PC866_MULT = 31,   // PC866(Mult)
+    MUNBYN_CODEPAGE_PC852_LATIN2 = 32, // PC852(Latin-2)
+    MUNBYN_CODEPAGE_PC866_PORT = 33,   // PC866(Portuguese)
+    MUNBYN_CODEPAGE_PC865_TEST = 34,   // PC865(TestEscPos)
+    MUNBYN_CODEPAGE_PC863_CAN = 35,    // PC863(Canadian)
+    MUNBYN_CODEPAGE_PC865_NORDIC = 36, // PC865(Nordic)
+    MUNBYN_CODEPAGE_PC866_RUSSIAN = 37, // PC866(Russian)
+    MUNBYN_CODEPAGE_PC855_BULG = 38,   // PC855(Bulgarian)
+    MUNBYN_CODEPAGE_PC857_TURKEY = 39, // PC857(Turkey)
+    MUNBYN_CODEPAGE_PC862_HEBREW = 40, // PC862(Hebrew)
+    MUNBYN_CODEPAGE_PC864_ARABIC = 41, // PC864(Arabic)
+    MUNBYN_CODEPAGE_PC737_GREEK = 42,  // PC737(Greek)
+    MUNBYN_CODEPAGE_PC851_GREEK = 43,  // PC851(Greek)
+    MUNBYN_CODEPAGE_PC869_GREEK = 44,  // PC869(Greek)
+    MUNBYN_CODEPAGE_PC928_GREEK = 45,  // PC928(Greek)
+    MUNBYN_CODEPAGE_PC772_LITH = 46,   // PC772(Lithuanian)
+    MUNBYN_CODEPAGE_PC774_LITH = 47,   // PC774(Lithuanian)
+    MUNBYN_CODEPAGE_PC874_THAI = 48,   // PC874(Thai)
+    MUNBYN_CODEPAGE_WPC1252_LATIN1 = 49, // WPC1252(Latin1)
+    MUNBYN_CODEPAGE_WPC1250_LATIN2 = 50, // WPC1250(Latin-2)
+    MUNBYN_CODEPAGE_WPC1251_CYR = 51,     // WPC1251(Cyrillic)
+    MUNBYN_CODEPAGE_PC3840_IBM_RUS = 52,  // PC3840(IBM-Russian)
+    MUNBYN_CODEPAGE_PC3841_GOST = 53,     // PC3841(Gost)
+    MUNBYN_CODEPAGE_PC3843_POLISH = 54,   // PC3843(Polish)
+    MUNBYN_CODEPAGE_PC3844_CS2 = 55,      // PC3844(CS2)
+    MUNBYN_CODEPAGE_PC3845_HUNG = 56,     // PC3845(Hungarian)
+    MUNBYN_CODEPAGE_PC3846_TURK = 57,     // PC3846(Turkish)
+    MUNBYN_CODEPAGE_PC3847_BR_ABNT = 58,  // PC3847(Brazil-ABNT)
+    MUNBYN_CODEPAGE_PC3848_BRAZIL = 59,   // PC3848(Brazil)
+    MUNBYN_CODEPAGE_PC1001_ARABIC = 60,   // PC1001(Arabic)
+    MUNBYN_CODEPAGE_PC2001_LITH = 61,     // PC2001(Lithuanian)
+    MUNBYN_CODEPAGE_PC3001_EST1 = 62,     // PC3001(Estonian-1)
+    MUNBYN_CODEPAGE_PC3002_EST2 = 63,     // PC3002(Eston-2)
+    MUNBYN_CODEPAGE_PC3011_LAT1 = 64,     // PC3011(Latvian-1)
+    MUNBYN_CODEPAGE_PC3012_LAT2 = 65,     // PC3012(Latv-2)
+    MUNBYN_CODEPAGE_PC3021_BULG = 66,     // PC3021(Bulgarian)
+    MUNBYN_CODEPAGE_PC3041_MALTESE = 67   // PC3041(Maltese)
+} munbyn_codepage_t;
+
 // Barcode types
 typedef enum {
     MUNBYN_BARCODE_UPC_A = 0,
@@ -145,6 +237,35 @@ munbyn_error_t munbyn_open_drawer(munbyn_handle_t handle, uint8_t pin);
 
 // Convenience function for optimal receipt printing and cutting
 munbyn_error_t munbyn_print_and_cut(munbyn_handle_t handle, const char* text, munbyn_cut_mode_t cut_mode);
+
+// Text control commands
+munbyn_error_t munbyn_line_feed(munbyn_handle_t handle);
+munbyn_error_t munbyn_carriage_return(munbyn_handle_t handle);
+
+// Character set and codepage commands
+munbyn_error_t munbyn_set_international_charset(munbyn_handle_t handle, munbyn_international_charset_t charset);
+munbyn_error_t munbyn_set_codepage(munbyn_handle_t handle, munbyn_codepage_t codepage);
+
+// Helper function to get codepage name
+const char* munbyn_get_codepage_name(munbyn_codepage_t codepage);
+
+// Text formatting and alignment commands
+munbyn_error_t munbyn_set_justification(munbyn_handle_t handle, munbyn_justify_t justify);
+munbyn_error_t munbyn_set_font(munbyn_handle_t handle, munbyn_font_t font);
+munbyn_error_t munbyn_set_text_mode(munbyn_handle_t handle, uint8_t modes);
+munbyn_error_t munbyn_set_emphasis(munbyn_handle_t handle, bool enabled);
+munbyn_error_t munbyn_set_double_strike(munbyn_handle_t handle, bool enabled);
+munbyn_error_t munbyn_set_underline(munbyn_handle_t handle, uint8_t mode);
+munbyn_error_t munbyn_set_line_spacing_default(munbyn_handle_t handle);
+munbyn_error_t munbyn_set_line_spacing(munbyn_handle_t handle, uint8_t spacing);
+munbyn_error_t munbyn_set_character_spacing(munbyn_handle_t handle, uint8_t spacing);
+munbyn_error_t munbyn_set_left_margin(munbyn_handle_t handle, uint16_t margin);
+munbyn_error_t munbyn_set_print_area_width(munbyn_handle_t handle, uint16_t width);
+
+// Text rotation and inversion
+munbyn_error_t munbyn_set_rotate_90(munbyn_handle_t handle, bool enabled);
+munbyn_error_t munbyn_set_upside_down(munbyn_handle_t handle, bool enabled);
+munbyn_error_t munbyn_set_character_smoothing(munbyn_handle_t handle, bool enabled);
 
 #ifdef __cplusplus
 }

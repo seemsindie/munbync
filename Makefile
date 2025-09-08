@@ -31,9 +31,15 @@ EXAMPLE = example
 EXAMPLE_SOURCES = example.c
 FEED_TEST = feed_test
 FEED_TEST_SOURCES = feed_test.c
+CHARSET_EXAMPLE = charset_example
+CHARSET_EXAMPLE_SOURCES = charset_example.c
+CODEPAGE_TABLE_EXAMPLE = codepage_table_example
+CODEPAGE_TABLE_EXAMPLE_SOURCES = codepage_table_example.c
+TEXT_FORMATTING_EXAMPLE = text_formatting_example
+TEXT_FORMATTING_EXAMPLE_SOURCES = text_formatting_example.c
 
 # Default target
-all: $(LIBRARY) $(EXAMPLE) $(FEED_TEST)
+all: $(LIBRARY) $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE)
 
 # Static library
 $(LIBRARY): $(OBJECTS)
@@ -51,13 +57,22 @@ $(EXAMPLE): $(EXAMPLE_SOURCES) $(LIBRARY)
 $(FEED_TEST): $(FEED_TEST_SOURCES) $(LIBRARY)
 	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
 
+$(CHARSET_EXAMPLE): $(CHARSET_EXAMPLE_SOURCES) $(LIBRARY)
+	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+
+$(CODEPAGE_TABLE_EXAMPLE): $(CODEPAGE_TABLE_EXAMPLE_SOURCES) $(LIBRARY)
+	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+
+$(TEXT_FORMATTING_EXAMPLE): $(TEXT_FORMATTING_EXAMPLE_SOURCES) $(LIBRARY)
+	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+
 # Object files
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
 # Clean
 clean:
-	rm -f $(OBJECTS) $(LIBRARY) $(SHARED_LIB) $(EXAMPLE) $(FEED_TEST)
+	rm -f $(OBJECTS) $(LIBRARY) $(SHARED_LIB) $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE)
 
 # Install (Linux/Mac)
 install: $(LIBRARY) $(SHARED_LIB)
@@ -81,6 +96,9 @@ help:
 	@echo "  $(SHARED_LIB)      - Build shared library"
 	@echo "  $(EXAMPLE)        - Build basic example program"
 	@echo "  $(FEED_TEST)   - Build feed line test program"
+	@echo "  $(CHARSET_EXAMPLE) - Build character set example program"
+	@echo "  $(CODEPAGE_TABLE_EXAMPLE) - Build codepage table generator"
+	@echo "  $(TEXT_FORMATTING_EXAMPLE) - Build text formatting demo program"
 	@echo "  clean       - Remove build files"
 	@echo "  install     - Install library system-wide (Linux/Mac)"
 	@echo "  uninstall   - Remove installed library (Linux/Mac)"
