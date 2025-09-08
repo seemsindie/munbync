@@ -20,17 +20,22 @@ typedef enum {
     MUNBYN_ERROR_NOT_INITIALIZED = -6
 } munbyn_error_t;
 
-// Print justification
+// Print justification (ESC a n command)
 typedef enum {
-    MUNBYN_JUSTIFY_LEFT = 0,
-    MUNBYN_JUSTIFY_CENTER = 1,
-    MUNBYN_JUSTIFY_RIGHT = 2
+    MUNBYN_JUSTIFY_LEFT = 0,         // ESC a 0 - Left justification
+    MUNBYN_JUSTIFY_CENTER = 1,       // ESC a 1 - Centering
+    MUNBYN_JUSTIFY_RIGHT = 2,        // ESC a 2 - Right justification
+    MUNBYN_JUSTIFY_LEFT_ALT = 48,    // ESC a 48 - Left justification (alternative)
+    MUNBYN_JUSTIFY_CENTER_ALT = 49,  // ESC a 49 - Centering (alternative)
+    MUNBYN_JUSTIFY_RIGHT_ALT = 50,   // ESC a 50 - Right justification (alternative)
 } munbyn_justify_t;
 
-// Font types
+// Font types (ESC M n command)
 typedef enum {
-    MUNBYN_FONT_A = 0,
-    MUNBYN_FONT_B = 1
+    MUNBYN_FONT_A = 0,        // ESC M 0 - Character font A (12×24)
+    MUNBYN_FONT_B = 1,        // ESC M 1 - Character font B (9×17)
+    MUNBYN_FONT_A_ALT = 48,   // ESC M 48 - Character font A (12×24) alternative
+    MUNBYN_FONT_B_ALT = 49,   // ESC M 49 - Character font B (9×17) alternative
 } munbyn_font_t;
 
 // Print modes
@@ -42,10 +47,12 @@ typedef enum {
     MUNBYN_MODE_UNDERLINE = 0x80
 } munbyn_print_mode_t;
 
-// Cut modes
+// Cut modes (based on GS V m command)
 typedef enum {
-    MUNBYN_CUT_PARTIAL = 0,
-    MUNBYN_CUT_FULL = 1,
+    MUNBYN_CUT_ONE_POINT_UNCUT = 0,     // GS V 0 - one point left uncut
+    MUNBYN_CUT_PARTIAL = 1,             // GS V 1 - partial cut
+    MUNBYN_CUT_ONE_POINT_UNCUT_ALT = 48, // GS V 48 - one point left uncut (alternative)
+    MUNBYN_CUT_PARTIAL_ALT = 49,        // GS V 49 - partial cut (alternative)
 } munbyn_cut_mode_t;
 
 // International character sets (ESC R n)
@@ -229,11 +236,21 @@ munbyn_error_t munbyn_write_data(munbyn_handle_t handle, const uint8_t* data, si
 munbyn_error_t munbyn_read_data(munbyn_handle_t handle, uint8_t* buffer, size_t buffer_size, size_t* bytes_read);
 munbyn_error_t munbyn_get_status(munbyn_handle_t handle, munbyn_status_t* status);
 
+// Drawer connector pins (ESC p m command)
+typedef enum {
+    MUNBYN_DRAWER_PIN_2 = 0,      // ESC p 0 - Drawer kick-out connector pin 2
+    MUNBYN_DRAWER_PIN_5 = 1,      // ESC p 1 - Drawer kick-out connector pin 5
+    MUNBYN_DRAWER_PIN_2_ALT = 48, // ESC p 48 - Drawer kick-out connector pin 2 (alternative)
+    MUNBYN_DRAWER_PIN_5_ALT = 49, // ESC p 49 - Drawer kick-out connector pin 5 (alternative)
+} munbyn_drawer_pin_t;
+
 // Basic printer operations
 munbyn_error_t munbyn_initialize(munbyn_handle_t handle);
 munbyn_error_t munbyn_cut_paper(munbyn_handle_t handle, munbyn_cut_mode_t mode);
+munbyn_error_t munbyn_feed_and_cut(munbyn_handle_t handle, uint8_t feed_amount);
 munbyn_error_t munbyn_feed_lines(munbyn_handle_t handle, uint8_t lines);
-munbyn_error_t munbyn_open_drawer(munbyn_handle_t handle, uint8_t pin);
+munbyn_error_t munbyn_open_drawer(munbyn_handle_t handle, munbyn_drawer_pin_t pin, uint8_t on_time, uint8_t off_time);
+munbyn_error_t munbyn_open_drawer_default(munbyn_handle_t handle, munbyn_drawer_pin_t pin);
 
 // Convenience function for optimal receipt printing and cutting
 munbyn_error_t munbyn_print_and_cut(munbyn_handle_t handle, const char* text, munbyn_cut_mode_t cut_mode);
@@ -256,8 +273,10 @@ munbyn_error_t munbyn_set_text_mode(munbyn_handle_t handle, uint8_t modes);
 munbyn_error_t munbyn_set_emphasis(munbyn_handle_t handle, bool enabled);
 munbyn_error_t munbyn_set_double_strike(munbyn_handle_t handle, bool enabled);
 munbyn_error_t munbyn_set_underline(munbyn_handle_t handle, uint8_t mode);
+munbyn_error_t munbyn_set_underline_kanji(munbyn_handle_t handle, uint8_t mode);
 munbyn_error_t munbyn_set_line_spacing_default(munbyn_handle_t handle);
 munbyn_error_t munbyn_set_line_spacing(munbyn_handle_t handle, uint8_t spacing);
+munbyn_error_t munbyn_set_motion_units(munbyn_handle_t handle, uint8_t horizontal, uint8_t vertical);
 munbyn_error_t munbyn_set_character_spacing(munbyn_handle_t handle, uint8_t spacing);
 munbyn_error_t munbyn_set_left_margin(munbyn_handle_t handle, uint16_t margin);
 munbyn_error_t munbyn_set_print_area_width(munbyn_handle_t handle, uint16_t width);
@@ -265,7 +284,16 @@ munbyn_error_t munbyn_set_print_area_width(munbyn_handle_t handle, uint16_t widt
 // Text rotation and inversion
 munbyn_error_t munbyn_set_rotate_90(munbyn_handle_t handle, bool enabled);
 munbyn_error_t munbyn_set_upside_down(munbyn_handle_t handle, bool enabled);
-munbyn_error_t munbyn_set_character_smoothing(munbyn_handle_t handle, bool enabled);
+
+// Advanced text effects
+munbyn_error_t munbyn_set_inverted_text(munbyn_handle_t handle, bool enabled);
+munbyn_error_t munbyn_set_text_scale(munbyn_handle_t handle, uint8_t width_scale, uint8_t height_scale);
+munbyn_error_t munbyn_cancel_all_formatting(munbyn_handle_t handle);
+
+// Print direction and orientation
+munbyn_error_t munbyn_set_print_direction(munbyn_handle_t handle, uint8_t direction);
+munbyn_error_t munbyn_set_relative_horizontal_position(munbyn_handle_t handle, int16_t position);
+munbyn_error_t munbyn_set_absolute_horizontal_position(munbyn_handle_t handle, uint16_t position);
 
 #ifdef __cplusplus
 }

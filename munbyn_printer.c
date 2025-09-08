@@ -17,6 +17,7 @@
 #endif
 
 #define ESC 0x1B
+#define FS 0x1C
 #define GS 0x1D
 
 struct munbyn_printer
@@ -67,6 +68,10 @@ struct munbyn_printer
     munbyn_hri_position_t hri_position;
     munbyn_codepage_t current_codepage;
     munbyn_international_charset_t current_charset;
+    
+    // Motion units (GS P command)
+    uint8_t horizontal_motion_unit;  // Default: 180 (1/180 inch)
+    uint8_t vertical_motion_unit;    // Default: 180 (1/180 inch)
 };
 
 #ifdef _WIN32
@@ -423,6 +428,10 @@ munbyn_error_t munbyn_initialize(munbyn_handle_t handle)
         // Reset internal state
         handle->current_font = MUNBYN_FONT_A;
         handle->current_modes = MUNBYN_MODE_NORMAL;
+        
+        // Set default motion units (GS P defaults)
+        handle->horizontal_motion_unit = 180;  // 1/180 inch
+        handle->vertical_motion_unit = 180;    // 1/180 inch (corrected from manual)
         handle->current_justify = MUNBYN_JUSTIFY_LEFT;
         handle->barcode_height = 162; // Default height
         handle->barcode_width = 3;    // Default width
@@ -440,23 +449,37 @@ munbyn_error_t munbyn_cut_paper(munbyn_handle_t handle, munbyn_cut_mode_t mode)
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    uint8_t cut_cmd[4];
+    uint8_t cut_cmd[3];
     
-    if (mode == MUNBYN_CUT_PARTIAL) {
-        // GS V 1 - Partial cut (leaves 1 point uncut)
+    // Validate mode parameter according to manual specification
+    if (mode == MUNBYN_CUT_ONE_POINT_UNCUT || mode == MUNBYN_CUT_PARTIAL || 
+        mode == MUNBYN_CUT_ONE_POINT_UNCUT_ALT || mode == MUNBYN_CUT_PARTIAL_ALT) {
+        
+        // GS V m - Select cut mode and cut paper
         cut_cmd[0] = GS;
         cut_cmd[1] = 0x56;
-        cut_cmd[2] = 0x01;
-        return munbyn_write_data(handle, cut_cmd, 3);
-    } else if (mode == MUNBYN_CUT_FULL) {
-        // GS V 0 - Full cut
-        cut_cmd[0] = GS;
-        cut_cmd[1] = 0x56;
-        cut_cmd[2] = 0x00;
+        cut_cmd[2] = (uint8_t)mode;
         return munbyn_write_data(handle, cut_cmd, 3);
     }
 
     return MUNBYN_ERROR_INVALID_PARAMETER;
+}
+
+munbyn_error_t munbyn_feed_and_cut(munbyn_handle_t handle, uint8_t feed_amount)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // GS V 66 n - Feeds paper (cutting position + [n × (vertical motion unit)]), 
+    // and cuts the paper partially (one point left uncut)
+    uint8_t feed_cut_cmd[4];
+    feed_cut_cmd[0] = GS;
+    feed_cut_cmd[1] = 0x56;
+    feed_cut_cmd[2] = 66;
+    feed_cut_cmd[3] = feed_amount;
+    
+    return munbyn_write_data(handle, feed_cut_cmd, 4);
 }
 
 munbyn_error_t munbyn_feed_lines(munbyn_handle_t handle, uint8_t lines)
@@ -471,23 +494,34 @@ munbyn_error_t munbyn_feed_lines(munbyn_handle_t handle, uint8_t lines)
     return munbyn_write_data(handle, feed_cmd, sizeof(feed_cmd));
 }
 
-munbyn_error_t munbyn_open_drawer(munbyn_handle_t handle, uint8_t pin)
+munbyn_error_t munbyn_open_drawer(munbyn_handle_t handle, munbyn_drawer_pin_t pin, uint8_t on_time, uint8_t off_time)
 {
     if (!handle || !handle->initialized) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    if (pin != 0 && pin != 1) {
+    // Validate pin parameter according to manual specification
+    if (pin != MUNBYN_DRAWER_PIN_2 && pin != MUNBYN_DRAWER_PIN_5 && 
+        pin != MUNBYN_DRAWER_PIN_2_ALT && pin != MUNBYN_DRAWER_PIN_5_ALT) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    // ESC p m t1 t2 - Generate pulse on pin
-    // m: pin number (0 or 1)
-    // t1: ON time (t1 * 2ms)
-    // t2: OFF time (t2 * 2ms)
-    uint8_t drawer_cmd[] = {ESC, 0x70, pin, 25, 250}; // 50ms ON, 500ms OFF
+    // ESC p m t1 t2 - Generate pulse on connector pin
+    // m: connector pin selection (0, 1, 48, 49)
+    //    0, 48: Drawer kick-out connector pin 2
+    //    1, 49: Drawer kick-out connector pin 5
+    // t1: ON time (t1 × 2ms), range 0-255
+    // t2: OFF time (t2 × 2ms), range 0-255
+    //     If t2 < t1, the OFF time is [t1 × 2ms]
+    uint8_t drawer_cmd[] = {ESC, 0x70, (uint8_t)pin, on_time, off_time};
     
     return munbyn_write_data(handle, drawer_cmd, sizeof(drawer_cmd));
+}
+
+munbyn_error_t munbyn_open_drawer_default(munbyn_handle_t handle, munbyn_drawer_pin_t pin)
+{
+    // Use default timing: 50ms ON, 500ms OFF (25 × 2ms, 250 × 2ms)
+    return munbyn_open_drawer(handle, pin, 25, 250);
 }
 
 munbyn_error_t munbyn_print_and_cut(munbyn_handle_t handle, const char* text, munbyn_cut_mode_t cut_mode)
@@ -522,7 +556,7 @@ munbyn_error_t munbyn_line_feed(munbyn_handle_t handle)
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    // LF - Line Feed (move cursor down one line)
+    // LF - Line Feed (print and move cursor down one line)
     uint8_t lf_cmd[] = {0x0A};
     
     return munbyn_write_data(handle, lf_cmd, sizeof(lf_cmd));
@@ -670,15 +704,16 @@ munbyn_error_t munbyn_set_justification(munbyn_handle_t handle, munbyn_justify_t
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    // Validate justification parameter
-    if (justify < MUNBYN_JUSTIFY_LEFT || justify > MUNBYN_JUSTIFY_RIGHT) {
+    // Validate justification parameter according to manual specification
+    if (justify != MUNBYN_JUSTIFY_LEFT && justify != MUNBYN_JUSTIFY_CENTER && justify != MUNBYN_JUSTIFY_RIGHT &&
+        justify != MUNBYN_JUSTIFY_LEFT_ALT && justify != MUNBYN_JUSTIFY_CENTER_ALT && justify != MUNBYN_JUSTIFY_RIGHT_ALT) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
     // ESC a n - Set justification
-    // n = 0: Left justification
-    // n = 1: Center justification  
-    // n = 2: Right justification
+    // n = 0, 48: Left justification
+    // n = 1, 49: Centering
+    // n = 2, 50: Right justification
     uint8_t justify_cmd[] = {ESC, 0x61, (uint8_t)justify};
     
     munbyn_error_t result = munbyn_write_data(handle, justify_cmd, sizeof(justify_cmd));
@@ -695,14 +730,15 @@ munbyn_error_t munbyn_set_font(munbyn_handle_t handle, munbyn_font_t font)
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    // Validate font parameter
-    if (font < MUNBYN_FONT_A || font > MUNBYN_FONT_B) {
+    // Validate font parameter according to manual specification
+    if (font != MUNBYN_FONT_A && font != MUNBYN_FONT_B && 
+        font != MUNBYN_FONT_A_ALT && font != MUNBYN_FONT_B_ALT) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
     // ESC M n - Select character font
-    // n = 0: Font A (12×24)
-    // n = 1: Font B (9×17)
+    // n = 0, 48: Font A (12×24)
+    // n = 1, 49: Font B (9×17)
     uint8_t font_cmd[] = {ESC, 0x4D, (uint8_t)font};
     
     munbyn_error_t result = munbyn_write_data(handle, font_cmd, sizeof(font_cmd));
@@ -780,27 +816,48 @@ munbyn_error_t munbyn_set_underline(munbyn_handle_t handle, uint8_t mode)
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    // Validate underline mode (0-2)
-    if (mode > 2) {
+    // Validate underline mode (0-2 or 48-50)
+    if (mode > 2 && (mode < 48 || mode > 50)) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
     // ESC - n - Turn underline mode on/off
-    // n = 0: Cancel underline mode
-    // n = 1: Select underline mode (1-dot thick)
-    // n = 2: Select underline mode (2-dot thick)
+    // n = 0,48: Cancel underline mode
+    // n = 1,49: Select underline mode (1-dot thick)
+    // n = 2,50: Select underline mode (2-dot thick)
     uint8_t underline_cmd[] = {ESC, 0x2D, mode};
     
     munbyn_error_t result = munbyn_write_data(handle, underline_cmd, sizeof(underline_cmd));
     if (result == MUNBYN_OK) {
-        if (mode > 0) {
-            handle->current_modes |= MUNBYN_MODE_UNDERLINE;
-        } else {
+        // Update mode based on enabled state (both 0,48 = off, others = on)
+        if (mode == 0 || mode == 48) {
             handle->current_modes &= ~MUNBYN_MODE_UNDERLINE;
+        } else {
+            handle->current_modes |= MUNBYN_MODE_UNDERLINE;
         }
     }
     
     return result;
+}
+
+munbyn_error_t munbyn_set_underline_kanji(munbyn_handle_t handle, uint8_t mode)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // Validate underline mode (0-2 or 48-50)
+    if (mode > 2 && (mode < 48 || mode > 50)) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // FS - n - Turn underline mode on/off for Kanji characters
+    // n = 0,48: Turns off underline mode for Kanji characters
+    // n = 1,49: Turns on underline mode for Kanji characters (1-dot thick)
+    // n = 2,50: Turns on underline mode for Kanji characters (2-dot thick)
+    uint8_t underline_cmd[] = {FS, 0x2D, mode};
+    
+    return munbyn_write_data(handle, underline_cmd, sizeof(underline_cmd));
 }
 
 munbyn_error_t munbyn_set_line_spacing_default(munbyn_handle_t handle)
@@ -821,11 +878,34 @@ munbyn_error_t munbyn_set_line_spacing(munbyn_handle_t handle, uint8_t spacing)
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    // ESC 3 n - Set line spacing to n/180 inch
-    // n can be 0-255 (0-255/180 inch)
+    // ESC 3 n - Set line spacing to n × vertical motion unit
+    // n can be 0-255, with default vertical motion unit (1/180 inch): n/180 inch
+    // ESC 3 30 = 30/180 = 1/6 inch = same as ESC 2 default
     uint8_t line_spacing_cmd[] = {ESC, 0x33, spacing};
     
     return munbyn_write_data(handle, line_spacing_cmd, sizeof(line_spacing_cmd));
+}
+
+munbyn_error_t munbyn_set_motion_units(munbyn_handle_t handle, uint8_t horizontal, uint8_t vertical)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // GS P x y - Set horizontal and vertical motion units
+    // x: horizontal motion unit (0-255), when 0 uses default
+    // y: vertical motion unit (0-255), when 0 uses default
+    // Motion unit = approximately 25.4/n mm (1/n inches)
+    uint8_t motion_cmd[] = {GS, 0x50, horizontal, vertical};
+    
+    munbyn_error_t result = munbyn_write_data(handle, motion_cmd, sizeof(motion_cmd));
+    if (result == MUNBYN_OK) {
+        // Update internal state, using defaults if 0 specified
+        handle->horizontal_motion_unit = (horizontal == 0) ? 180 : horizontal;
+        handle->vertical_motion_unit = (vertical == 0) ? 180 : vertical;
+    }
+    
+    return result;
 }
 
 munbyn_error_t munbyn_set_character_spacing(munbyn_handle_t handle, uint8_t spacing)
@@ -848,7 +928,7 @@ munbyn_error_t munbyn_set_left_margin(munbyn_handle_t handle, uint16_t margin)
     }
 
     // GS L nL nH - Set left margin
-    // Margin = (nL + nH × 256) × horizontal motion unit
+    // Margin = (nL + nH × 256) × horizontal motion unit (default: 1/180 inch)
     uint8_t nL = margin & 0xFF;
     uint8_t nH = (margin >> 8) & 0xFF;
     
@@ -864,7 +944,8 @@ munbyn_error_t munbyn_set_print_area_width(munbyn_handle_t handle, uint16_t widt
     }
 
     // GS W nL nH - Set print area width
-    // Width = (nL + nH × 256) × horizontal motion unit
+    // Width = (nL + nH × 256) × horizontal motion unit (default: 1/180 inch)
+    // Default: nL=0, nH=2 (512 units) or nL=104, nH=1 (360 units for 58mm paper)
     uint8_t nL = width & 0xFF;
     uint8_t nH = (width >> 8) & 0xFF;
     
@@ -880,8 +961,9 @@ munbyn_error_t munbyn_set_rotate_90(munbyn_handle_t handle, bool enabled)
     }
 
     // ESC V n - Turn 90° clockwise rotation mode on/off
-    // n = 0: Cancel 90° clockwise rotation mode
-    // n = 1: Select 90° clockwise rotation mode
+    // n = 0,48: Cancel 90° clockwise rotation mode
+    // n = 1,49: Select 90° clockwise rotation mode
+    // Note: This implementation uses 0,1 values (alternatives 48,49 are functionally identical)
     uint8_t rotate_cmd[] = {ESC, 0x56, enabled ? 1 : 0};
     
     return munbyn_write_data(handle, rotate_cmd, sizeof(rotate_cmd));
@@ -894,23 +976,179 @@ munbyn_error_t munbyn_set_upside_down(munbyn_handle_t handle, bool enabled)
     }
 
     // ESC { n - Turn upside-down print mode on/off
-    // n = 0: Cancel upside-down print mode
-    // n = 1: Select upside-down print mode
+    // LSB of n = 0: Cancel upside-down print mode
+    // LSB of n = 1: Select upside-down print mode
+    // Only the lowest bit of n is valid (range 0-255)
     uint8_t upside_down_cmd[] = {ESC, 0x7B, enabled ? 1 : 0};
     
     return munbyn_write_data(handle, upside_down_cmd, sizeof(upside_down_cmd));
 }
 
-munbyn_error_t munbyn_set_character_smoothing(munbyn_handle_t handle, bool enabled)
+// Advanced text effects implementation
+
+munbyn_error_t munbyn_set_inverted_text(munbyn_handle_t handle, bool enabled)
 {
     if (!handle || !handle->initialized) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    // GS b n - Turn smoothing mode on/off
-    // n = 0: Cancel smoothing mode  
-    // n = 1: Select smoothing mode
-    uint8_t smoothing_cmd[] = {GS, 0x62, enabled ? 1 : 0};
+    // GS B n - Turn white/black reverse printing mode on/off
+    // n = 0 (LSB = 0): White/black reverse mode off
+    // n = 1 (LSB = 1): White/black reverse mode on
+    // Only the lowest bit of n is valid
+    uint8_t reverse_cmd[] = {GS, 0x42, enabled ? 1 : 0};
     
-    return munbyn_write_data(handle, smoothing_cmd, sizeof(smoothing_cmd));
+    return munbyn_write_data(handle, reverse_cmd, sizeof(reverse_cmd));
+}
+
+munbyn_error_t munbyn_set_text_scale(munbyn_handle_t handle, uint8_t width_scale, uint8_t height_scale)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // Validate scale parameters (1-8 for width, 1-8 for height)
+    if (width_scale < 1 || width_scale > 8 || height_scale < 1 || height_scale > 8) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // GS ! n - Select character size
+    // Bits 0-3: Character height (1-8 times)
+    // Bits 4-7: Character width (1-8 times)
+    uint8_t scale_value = ((width_scale - 1) << 4) | (height_scale - 1);
+    uint8_t scale_cmd[] = {GS, 0x21, scale_value};
+    
+    return munbyn_write_data(handle, scale_cmd, sizeof(scale_cmd));
+}
+
+munbyn_error_t munbyn_cancel_all_formatting(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    munbyn_error_t result;
+    
+    // Cancel all text formatting modes individually for maximum compatibility
+    
+    // Cancel emphasis
+    result = munbyn_set_emphasis(handle, false);
+    if (result != MUNBYN_OK) return result;
+    
+    // Cancel double-strike
+    result = munbyn_set_double_strike(handle, false);
+    if (result != MUNBYN_OK) return result;
+    
+    // Cancel underline
+    result = munbyn_set_underline(handle, 0);
+    if (result != MUNBYN_OK) return result;
+    
+    // Cancel inverted text (white/black reverse mode)
+    result = munbyn_set_inverted_text(handle, false);
+    if (result != MUNBYN_OK) return result;
+    
+    // Reset text modes to normal
+    result = munbyn_set_text_mode(handle, MUNBYN_MODE_NORMAL);
+    if (result != MUNBYN_OK) return result;
+    
+    // Reset text scale to 1x1
+    result = munbyn_set_text_scale(handle, 1, 1);
+    if (result != MUNBYN_OK) return result;
+    
+    // Reset justification to left
+    result = munbyn_set_justification(handle, MUNBYN_JUSTIFY_LEFT);
+    if (result != MUNBYN_OK) return result;
+    
+    // Reset to Font A
+    result = munbyn_set_font(handle, MUNBYN_FONT_A);
+    if (result != MUNBYN_OK) return result;
+    
+    // Reset character spacing
+    result = munbyn_set_character_spacing(handle, 0);
+    if (result != MUNBYN_OK) return result;
+    
+    // Reset line spacing to default
+    result = munbyn_set_line_spacing_default(handle);
+    if (result != MUNBYN_OK) return result;
+    
+    // Cancel rotation
+    result = munbyn_set_rotate_90(handle, false);
+    if (result != MUNBYN_OK) return result;
+    
+    // Cancel upside-down printing
+    result = munbyn_set_upside_down(handle, false);
+    if (result != MUNBYN_OK) return result;
+
+    return MUNBYN_OK;
+}
+
+munbyn_error_t munbyn_set_print_direction(munbyn_handle_t handle, uint8_t direction)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // Validate direction parameter (0-3 or 48-51)
+    if (direction > 3 && (direction < 48 || direction > 51)) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // ESC T n - Select print direction in page mode
+    // Sets both print direction and starting position:
+    // n = 0, 48: Left to right, Upper left starting position
+    // n = 1, 49: Bottom to top, Lower left starting position
+    // n = 2, 50: Right to left, Lower right starting position
+    // n = 3, 51: Top to bottom, Upper right starting position
+    uint8_t direction_cmd[] = {ESC, 0x54, direction};
+    
+    return munbyn_write_data(handle, direction_cmd, sizeof(direction_cmd));
+}
+
+munbyn_error_t munbyn_set_relative_horizontal_position(munbyn_handle_t handle, int16_t position)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // ESC \ nL nH - Set relative print position
+    // Rightward movement: N = nL + nH × 256
+    // Leftward movement: nL + nH × 256 = 65536 - N (complement of 65536)
+    // Motion units depend on print direction (set by ESC T)
+    
+    uint16_t value;
+    if (position >= 0) {
+        // Positive: rightward movement
+        value = (uint16_t)position;
+    } else {
+        // Negative: leftward movement using 65536 complement
+        value = 65536 + position;  // position is negative, so this is 65536 - abs(position)
+    }
+    
+    uint8_t nL = value & 0xFF;
+    uint8_t nH = (value >> 8) & 0xFF;
+    
+    uint8_t rel_pos_cmd[] = {ESC, 0x5C, nL, nH};
+    
+    return munbyn_write_data(handle, rel_pos_cmd, sizeof(rel_pos_cmd));
+}
+
+munbyn_error_t munbyn_set_absolute_horizontal_position(munbyn_handle_t handle, uint16_t position)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // ESC $ nL nH - Set absolute print position
+    // Sets distance from beginning of line to print position
+    // Distance = (nL + nH × 256) × (horizontal or vertical motion unit) inches
+    // Motion units specified by GS P command
+    // Standard mode: uses horizontal motion unit (x)  
+    // Page mode: unit type depends on starting position (set by ESC T)
+    // Settings outside printable area are ignored
+    uint8_t nL = position & 0xFF;
+    uint8_t nH = (position >> 8) & 0xFF;
+    
+    uint8_t abs_pos_cmd[] = {ESC, 0x24, nL, nH};
+    
+    return munbyn_write_data(handle, abs_pos_cmd, sizeof(abs_pos_cmd));
 }

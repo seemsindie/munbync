@@ -68,9 +68,9 @@ int main() {
         printf("Partial cut performed successfully!\n");
     }
     
-    // Test cash drawer (pin 0)
-    printf("Opening cash drawer (pin 0)...\n");
-    result = munbyn_open_drawer(printer, 0);
+    // Test cash drawer (connector pin 2)
+    printf("Opening cash drawer (connector pin 2)...\n");
+    result = munbyn_open_drawer_default(printer, MUNBYN_DRAWER_PIN_2);
     if (result != MUNBYN_OK) {
         printf("Failed to open drawer: error %d\n", result);
     } else {

@@ -209,12 +209,91 @@ int main(int argc, char *argv[])
     munbyn_write_data(printer, (const uint8_t*)"Normal margin", 13);
     munbyn_line_feed(printer);
     
-    munbyn_set_left_margin(printer, 50);
+    munbyn_set_left_margin(printer, 90);  // 90/180 = 0.5 inch margin
     munbyn_write_data(printer, (const uint8_t*)"Indented text", 13);
     munbyn_line_feed(printer);
     
     // Reset margin
     munbyn_set_left_margin(printer, 0);
+    munbyn_line_feed(printer);
+    
+    // 10. Inverted Text Demo
+    print_section_header(printer, "10. INVERTED TEXT");
+    
+    munbyn_write_data(printer, (const uint8_t*)"Normal text", 11);
+    munbyn_line_feed(printer);
+    
+    munbyn_set_inverted_text(printer, true);
+    munbyn_write_data(printer, (const uint8_t*)"INVERTED TEXT", 13);
+    munbyn_line_feed(printer);
+    munbyn_set_inverted_text(printer, false);
+    
+    // Inverted with bold
+    munbyn_set_inverted_text(printer, true);
+    munbyn_set_emphasis(printer, true);
+    munbyn_write_data(printer, (const uint8_t*)"BOLD INVERTED", 13);
+    munbyn_line_feed(printer);
+    munbyn_set_inverted_text(printer, false);
+    munbyn_set_emphasis(printer, false);
+    
+    munbyn_line_feed(printer);
+    
+    // 11. Advanced Text Scaling Demo
+    print_section_header(printer, "11. ADVANCED SCALING");
+    
+    munbyn_write_data(printer, (const uint8_t*)"Normal (1x1):", 13);
+    munbyn_line_feed(printer);
+    
+    munbyn_set_text_scale(printer, 2, 1);
+    munbyn_write_data(printer, (const uint8_t*)"Wide (2x1)", 10);
+    munbyn_line_feed(printer);
+    
+    munbyn_set_text_scale(printer, 1, 2);
+    munbyn_write_data(printer, (const uint8_t*)"Tall (1x2)", 10);
+    munbyn_line_feed(printer);
+    
+    munbyn_set_text_scale(printer, 3, 3);
+    munbyn_write_data(printer, (const uint8_t*)"HUGE 3x3", 8);
+    munbyn_line_feed(printer);
+    
+    // Reset scaling
+    munbyn_set_text_scale(printer, 1, 1);
+    munbyn_line_feed(printer);
+    
+    // 12. Positioning Demo
+    print_section_header(printer, "12. POSITIONING");
+    
+    munbyn_write_data(printer, (const uint8_t*)"Left", 4);
+    munbyn_set_absolute_horizontal_position(printer, 200);
+    munbyn_write_data(printer, (const uint8_t*)"Center", 6);
+    munbyn_set_absolute_horizontal_position(printer, 400);
+    munbyn_write_data(printer, (const uint8_t*)"Right", 5);
+    munbyn_line_feed(printer);
+    
+    // Relative positioning demo
+    munbyn_write_data(printer, (const uint8_t*)"Start", 5);
+    munbyn_set_relative_horizontal_position(printer, 50);
+    munbyn_write_data(printer, (const uint8_t*)"->", 2);
+    munbyn_set_relative_horizontal_position(printer, 50);
+    munbyn_write_data(printer, (const uint8_t*)"->", 2);
+    munbyn_set_relative_horizontal_position(printer, 50);
+    munbyn_write_data(printer, (const uint8_t*)"End", 3);
+    munbyn_line_feed(printer);
+    munbyn_line_feed(printer);
+    
+    // 13. Combined Effects Demo
+    print_section_header(printer, "13. COMBINED EFFECTS");
+    
+    // Spectacular combined demo
+    munbyn_set_justification(printer, MUNBYN_JUSTIFY_CENTER);
+    munbyn_set_inverted_text(printer, true);
+    munbyn_set_text_scale(printer, 2, 2);
+    munbyn_set_emphasis(printer, true);
+    munbyn_write_data(printer, (const uint8_t*)"AMAZING!", 8);
+    munbyn_line_feed(printer);
+    
+    // Reset all formatting
+    munbyn_cancel_all_formatting(printer);
     munbyn_line_feed(printer);
     
     // Final section
