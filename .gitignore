@@ -1,0 +1,29 @@
+# Build outputs
+*.o
+*.a
+*.so
+/build/
+
+# Example executables
+example
+feed_test
+charset_example
+codepage_table_example
+text_formatting_example
+barcode_example
+comprehensive_barcode_example
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.tmp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup

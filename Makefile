@@ -17,78 +17,90 @@ ifeq ($(OS),Windows_NT)
     LDFLAGS += -lws2_32
 endif
 
+# Directory structure
+SRC_DIR = src
+EXAMPLES_DIR = examples
+BUILD_DIR = build
+LIB_DIR = $(BUILD_DIR)/lib
+OBJ_DIR = $(BUILD_DIR)/obj
+EXAMPLES_BUILD_DIR = $(BUILD_DIR)/examples
+
 # Source files
-SOURCES = munbyn_printer.c
-HEADERS = munbyn_printer.h
-OBJECTS = $(SOURCES:.c=.o)
+SOURCES = $(SRC_DIR)/munbyn_printer.c
+HEADERS = $(SRC_DIR)/munbyn_printer.h
+OBJECTS = $(OBJ_DIR)/munbyn_printer.o
 
 # Library
-LIBRARY = libmunbyn.a
-SHARED_LIB = libmunbyn.so
+LIBRARY = $(LIB_DIR)/libmunbyn.a
+SHARED_LIB = $(LIB_DIR)/libmunbyn.so
 
 # Example programs
-EXAMPLE = example
-EXAMPLE_SOURCES = example.c
-FEED_TEST = feed_test
-FEED_TEST_SOURCES = feed_test.c
-CHARSET_EXAMPLE = charset_example
-CHARSET_EXAMPLE_SOURCES = charset_example.c
-CODEPAGE_TABLE_EXAMPLE = codepage_table_example
-CODEPAGE_TABLE_EXAMPLE_SOURCES = codepage_table_example.c
-TEXT_FORMATTING_EXAMPLE = text_formatting_example
-TEXT_FORMATTING_EXAMPLE_SOURCES = text_formatting_example.c
-BARCODE_EXAMPLE = barcode_example
-BARCODE_EXAMPLE_SOURCES = barcode_example.c
-COMPREHENSIVE_BARCODE_EXAMPLE = comprehensive_barcode_example
-COMPREHENSIVE_BARCODE_EXAMPLE_SOURCES = comprehensive_barcode_example.c
+EXAMPLE = $(EXAMPLES_BUILD_DIR)/example
+EXAMPLE_SOURCES = $(EXAMPLES_DIR)/example.c
+FEED_TEST = $(EXAMPLES_BUILD_DIR)/feed_test
+FEED_TEST_SOURCES = $(EXAMPLES_DIR)/feed_test.c
+CHARSET_EXAMPLE = $(EXAMPLES_BUILD_DIR)/charset_example
+CHARSET_EXAMPLE_SOURCES = $(EXAMPLES_DIR)/charset_example.c
+CODEPAGE_TABLE_EXAMPLE = $(EXAMPLES_BUILD_DIR)/codepage_table_example
+CODEPAGE_TABLE_EXAMPLE_SOURCES = $(EXAMPLES_DIR)/codepage_table_example.c
+TEXT_FORMATTING_EXAMPLE = $(EXAMPLES_BUILD_DIR)/text_formatting_example
+TEXT_FORMATTING_EXAMPLE_SOURCES = $(EXAMPLES_DIR)/text_formatting_example.c
+BARCODE_EXAMPLE = $(EXAMPLES_BUILD_DIR)/barcode_example
+BARCODE_EXAMPLE_SOURCES = $(EXAMPLES_DIR)/barcode_example.c
+COMPREHENSIVE_BARCODE_EXAMPLE = $(EXAMPLES_BUILD_DIR)/comprehensive_barcode_example
+COMPREHENSIVE_BARCODE_EXAMPLE_SOURCES = $(EXAMPLES_DIR)/comprehensive_barcode_example.c
 
 # Default target
 all: $(LIBRARY) $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE) $(BARCODE_EXAMPLE) $(COMPREHENSIVE_BARCODE_EXAMPLE)
 
+# Create build directories
+$(BUILD_DIR) $(LIB_DIR) $(OBJ_DIR) $(EXAMPLES_BUILD_DIR):
+	mkdir -p $@
+
 # Static library
-$(LIBRARY): $(OBJECTS)
+$(LIBRARY): $(OBJECTS) | $(LIB_DIR)
 	ar rcs $@ $^
 	ranlib $@
 
 # Shared library (Linux/Mac)
-$(SHARED_LIB): $(OBJECTS)
+$(SHARED_LIB): $(OBJECTS) | $(LIB_DIR)
 	$(CC) -shared -fPIC -o $@ $^ $(LDFLAGS)
 
 # Example programs
-$(EXAMPLE): $(EXAMPLE_SOURCES) $(LIBRARY)
-	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+$(EXAMPLE): $(EXAMPLE_SOURCES) $(LIBRARY) | $(EXAMPLES_BUILD_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -o $@ $< -L$(LIB_DIR) -lmunbyn $(LDFLAGS)
 
-$(FEED_TEST): $(FEED_TEST_SOURCES) $(LIBRARY)
-	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+$(FEED_TEST): $(FEED_TEST_SOURCES) $(LIBRARY) | $(EXAMPLES_BUILD_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -o $@ $< -L$(LIB_DIR) -lmunbyn $(LDFLAGS)
 
-$(CHARSET_EXAMPLE): $(CHARSET_EXAMPLE_SOURCES) $(LIBRARY)
-	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+$(CHARSET_EXAMPLE): $(CHARSET_EXAMPLE_SOURCES) $(LIBRARY) | $(EXAMPLES_BUILD_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -o $@ $< -L$(LIB_DIR) -lmunbyn $(LDFLAGS)
 
-$(CODEPAGE_TABLE_EXAMPLE): $(CODEPAGE_TABLE_EXAMPLE_SOURCES) $(LIBRARY)
-	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+$(CODEPAGE_TABLE_EXAMPLE): $(CODEPAGE_TABLE_EXAMPLE_SOURCES) $(LIBRARY) | $(EXAMPLES_BUILD_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -o $@ $< -L$(LIB_DIR) -lmunbyn $(LDFLAGS)
 
-$(TEXT_FORMATTING_EXAMPLE): $(TEXT_FORMATTING_EXAMPLE_SOURCES) $(LIBRARY)
-	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+$(TEXT_FORMATTING_EXAMPLE): $(TEXT_FORMATTING_EXAMPLE_SOURCES) $(LIBRARY) | $(EXAMPLES_BUILD_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -o $@ $< -L$(LIB_DIR) -lmunbyn $(LDFLAGS)
 
-$(BARCODE_EXAMPLE): $(BARCODE_EXAMPLE_SOURCES) $(LIBRARY)
-	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+$(BARCODE_EXAMPLE): $(BARCODE_EXAMPLE_SOURCES) $(LIBRARY) | $(EXAMPLES_BUILD_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -o $@ $< -L$(LIB_DIR) -lmunbyn $(LDFLAGS)
 
-$(COMPREHENSIVE_BARCODE_EXAMPLE): $(COMPREHENSIVE_BARCODE_EXAMPLE_SOURCES) $(LIBRARY)
-	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+$(COMPREHENSIVE_BARCODE_EXAMPLE): $(COMPREHENSIVE_BARCODE_EXAMPLE_SOURCES) $(LIBRARY) | $(EXAMPLES_BUILD_DIR)
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -o $@ $< -L$(LIB_DIR) -lmunbyn $(LDFLAGS)
 
 # Object files
-%.o: %.c $(HEADERS)
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADERS) | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
 # Clean
 clean:
-	rm -f $(OBJECTS) $(LIBRARY) $(SHARED_LIB) $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE) $(BARCODE_EXAMPLE) $(COMPREHENSIVE_BARCODE_EXAMPLE)
+	rm -rf $(BUILD_DIR)
 
 # Install (Linux/Mac)
 install: $(LIBRARY) $(SHARED_LIB)
 	sudo cp $(LIBRARY) /usr/local/lib/
 	sudo cp $(SHARED_LIB) /usr/local/lib/
-	sudo cp munbyn_printer.h /usr/local/include/
+	sudo cp $(SRC_DIR)/munbyn_printer.h /usr/local/include/
 	sudo ldconfig
 
 # Uninstall (Linux/Mac)
@@ -102,18 +114,20 @@ uninstall:
 help:
 	@echo "Available targets:"
 	@echo "  all         - Build library and example programs"
-	@echo "  $(LIBRARY)      - Build static library"
-	@echo "  $(SHARED_LIB)      - Build shared library"
-	@echo "  $(EXAMPLE)        - Build basic example program"
-	@echo "  $(FEED_TEST)   - Build feed line test program"
-	@echo "  $(CHARSET_EXAMPLE) - Build character set example program"
-	@echo "  $(CODEPAGE_TABLE_EXAMPLE) - Build codepage table generator"
-	@echo "  $(TEXT_FORMATTING_EXAMPLE) - Build text formatting demo program"
-	@echo "  $(BARCODE_EXAMPLE) - Build barcode demo program"
-	@echo "  $(COMPREHENSIVE_BARCODE_EXAMPLE) - Build comprehensive barcode test"
-	@echo "  clean       - Remove build files"
+	@echo "  library     - Build static library ($(LIBRARY))"
+	@echo "  shared      - Build shared library ($(SHARED_LIB))"
+	@echo "  examples    - Build all example programs"
+	@echo "  clean       - Remove build directory"
 	@echo "  install     - Install library system-wide (Linux/Mac)"
 	@echo "  uninstall   - Remove installed library (Linux/Mac)"
 	@echo "  help        - Show this help message"
+	@echo ""
+	@echo "Example programs are built to: $(EXAMPLES_BUILD_DIR)/"
+	@echo "Libraries are built to: $(LIB_DIR)/"
 
-.PHONY: all clean install uninstall help
+# Convenience targets
+library: $(LIBRARY)
+shared: $(SHARED_LIB)
+examples: $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE) $(BARCODE_EXAMPLE) $(COMPREHENSIVE_BARCODE_EXAMPLE)
+
+.PHONY: all library shared examples clean install uninstall help
