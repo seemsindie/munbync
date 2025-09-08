@@ -574,6 +574,63 @@ munbyn_error_t munbyn_carriage_return(munbyn_handle_t handle)
     return munbyn_write_data(handle, cr_cmd, sizeof(cr_cmd));
 }
 
+munbyn_error_t munbyn_horizontal_tab(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // HT - Horizontal Tab (move to next horizontal tab position)
+    uint8_t ht_cmd[] = {0x09};
+
+    return munbyn_write_data(handle, ht_cmd, sizeof(ht_cmd));
+}
+
+munbyn_error_t munbyn_set_horizontal_tab_positions(munbyn_handle_t handle, const uint8_t* positions, size_t count)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // k must be 1..32 according to the manual. If 0, use the clear function.
+    if (count == 0 || count > 32 || positions == NULL) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // Validate ascending order and range 1..255
+    for (size_t i = 0; i < count; i++) {
+        if (positions[i] < 1 || positions[i] > 255) {
+            return MUNBYN_ERROR_INVALID_PARAMETER;
+        }
+        if (i > 0 && positions[i] <= positions[i - 1]) {
+            return MUNBYN_ERROR_INVALID_PARAMETER;
+        }
+    }
+
+    // ESC D n1 ... nk NUL
+    uint8_t cmd[2 + 32 + 1];
+    size_t idx = 0;
+    cmd[idx++] = ESC;
+    cmd[idx++] = 0x44; // 'D'
+    for (size_t i = 0; i < count; i++) {
+        cmd[idx++] = positions[i];
+    }
+    cmd[idx++] = 0x00; // Terminator
+
+    return munbyn_write_data(handle, cmd, idx);
+}
+
+munbyn_error_t munbyn_clear_horizontal_tab_positions(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // ESC D NUL — cancels all horizontal tab positions
+    uint8_t cmd[] = {ESC, 0x44, 0x00};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
 // Character set and codepage commands implementation
 
 munbyn_error_t munbyn_set_international_charset(munbyn_handle_t handle, munbyn_international_charset_t charset)

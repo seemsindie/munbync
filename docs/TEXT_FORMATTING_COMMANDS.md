@@ -461,6 +461,9 @@ int main() {
 | `munbyn_set_print_direction` | `ESC T n` | Print direction control |
 | `munbyn_set_absolute_horizontal_position` | `ESC $ nL nH` | Absolute horizontal position |
 | `munbyn_set_relative_horizontal_position` | `ESC \ nL nH` | Relative horizontal position |
+| `munbyn_horizontal_tab` | `HT` | Move to next horizontal tab position |
+| `munbyn_set_horizontal_tab_positions` | `ESC D n1..nk NUL` | Set tab stops (1-32 positions) |
+| `munbyn_clear_horizontal_tab_positions` | `ESC D NUL` | Clear all tab positions |
 | `munbyn_cancel_all_formatting` | Multiple | Reset all formatting |
 
 ## Notes

@@ -262,6 +262,9 @@ munbyn_error_t munbyn_print_and_cut(munbyn_handle_t handle, const char* text, mu
 // Text control commands
 munbyn_error_t munbyn_line_feed(munbyn_handle_t handle);
 munbyn_error_t munbyn_carriage_return(munbyn_handle_t handle);
+munbyn_error_t munbyn_horizontal_tab(munbyn_handle_t handle);
+munbyn_error_t munbyn_set_horizontal_tab_positions(munbyn_handle_t handle, const uint8_t* positions, size_t count);
+munbyn_error_t munbyn_clear_horizontal_tab_positions(munbyn_handle_t handle);
 
 // Character set and codepage commands
 munbyn_error_t munbyn_set_international_charset(munbyn_handle_t handle, munbyn_international_charset_t charset);
