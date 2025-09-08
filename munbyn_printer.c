@@ -1152,3 +1152,203 @@ munbyn_error_t munbyn_set_absolute_horizontal_position(munbyn_handle_t handle, u
     
     return munbyn_write_data(handle, abs_pos_cmd, sizeof(abs_pos_cmd));
 }
+
+// Barcode operations
+
+munbyn_error_t munbyn_set_barcode_height(munbyn_handle_t handle, uint8_t height)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    // GS h n - Select bar code height
+    // n specifies the number of dots in the vertical direction
+    // Range: 1 ≤ n ≤ 255
+    // Default: n = 162
+    if (height < 1) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    uint8_t height_cmd[] = {GS, 0x68, height};
+    
+    munbyn_error_t result = munbyn_write_data(handle, height_cmd, sizeof(height_cmd));
+    if (result == MUNBYN_OK) {
+        handle->barcode_height = height;
+    }
+    
+    return result;
+}
+
+munbyn_error_t munbyn_set_barcode_width(munbyn_handle_t handle, uint8_t width)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    // GS w n - Set bar code width
+    // n specifies the horizontal size of the bar code
+    // Range: 2 ≤ n ≤ 6
+    // Default: n = 3
+    //
+    // Multi-level bar codes: UPC-A, UPC-E, JAN13(EAN13), JAN8(EAN8), CODE93, CODE128
+    // Binary-level bar codes: CODE39, ITF, CODABAR
+    //
+    // For multi-level: n = module width (mm)
+    // For binary-level: n = thin element width (mm), thick = n * 2.5
+    if (width < 2 || width > 6) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    uint8_t width_cmd[] = {GS, 0x77, width};
+    
+    munbyn_error_t result = munbyn_write_data(handle, width_cmd, sizeof(width_cmd));
+    if (result == MUNBYN_OK) {
+        handle->barcode_width = width;
+    }
+    
+    return result;
+}
+
+munbyn_error_t munbyn_set_hri_position(munbyn_handle_t handle, munbyn_hri_position_t position)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    // GS H n - Select print position of HRI characters
+    // Valid values: 0 ≤ n ≤ 3, 48 ≤ n ≤ 51
+    // 0,48: Do not print
+    // 1,49: Above the bar code (top of bar code)
+    // 2,50: Below the bar code
+    // 3,51: Both above and below the bar code
+    if (!((position >= 0 && position <= 3) || (position >= 48 && position <= 51))) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    uint8_t hri_cmd[] = {GS, 0x48, (uint8_t)position};
+    
+    munbyn_error_t result = munbyn_write_data(handle, hri_cmd, sizeof(hri_cmd));
+    if (result == MUNBYN_OK) {
+        handle->hri_position = position;
+    }
+    
+    return result;
+}
+
+munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t type, const char* data)
+{
+    if (!handle || !handle->initialized || !data) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    size_t data_len = strlen(data);
+    if (data_len == 0) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    // Validate data length based on barcode type specifications from manual
+    switch (type) {
+        case MUNBYN_BARCODE_UPC_A:
+            if (data_len != 11 && data_len != 12) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        case MUNBYN_BARCODE_UPC_E:
+            if (data_len != 11 && data_len != 12) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        case MUNBYN_BARCODE_JAN13:  // EAN13
+            if (data_len != 12 && data_len != 13) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        case MUNBYN_BARCODE_JAN8:   // EAN8
+            if (data_len != 7 && data_len != 8) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        case MUNBYN_BARCODE_CODE39:
+            if (data_len < 1 || data_len > 255) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        case MUNBYN_BARCODE_ITF:
+            // ITF requires even number of digits (even number length)
+            if (data_len < 1 || data_len > 255 || (data_len % 2) != 0) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        case MUNBYN_BARCODE_CODEBAR:
+            if (data_len < 1 || data_len > 255) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        case MUNBYN_BARCODE_CODE93:
+            if (data_len < 1 || data_len > 255) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        case MUNBYN_BARCODE_CODE128:
+            if (data_len < 2 || data_len > 255) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+            
+        default:
+            return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    uint8_t* cmd;
+    size_t cmd_size;
+    
+    // CODE93 and CODE128 use method 2 (GS k m n d1...dn)
+    // According to reference manual: method 2 for barcode types 65-73
+    // All other barcodes use method 1 (GS k m d1...dk NUL)
+    if (type == MUNBYN_BARCODE_CODE93 || type == MUNBYN_BARCODE_CODE128) {
+        // Method 2: GS k m n d1...dn
+        cmd_size = 4 + data_len;  // 3 (command) + 1 (length) + data_len
+        cmd = malloc(cmd_size);
+        if (!cmd) {
+            return MUNBYN_ERROR_BUFFER_OVERFLOW;
+        }
+        
+        cmd[0] = GS;
+        cmd[1] = 0x6B;  // 'k'
+        cmd[2] = (uint8_t)type;
+        cmd[3] = (uint8_t)data_len;  // Length of data
+        
+        // Copy data (no NUL terminator for method 2)
+        memcpy(&cmd[4], data, data_len);
+    } else {
+        // Method 1: GS k m d1...dk NUL
+        cmd_size = 3 + data_len + 1;  // 3 (command) + data_len + 1 (NUL)
+        cmd = malloc(cmd_size);
+        if (!cmd) {
+            return MUNBYN_ERROR_BUFFER_OVERFLOW;
+        }
+        
+        cmd[0] = GS;
+        cmd[1] = 0x6B;  // 'k'
+        cmd[2] = (uint8_t)type;
+        
+        // Copy data
+        memcpy(&cmd[3], data, data_len);
+        
+        // Add NUL terminator
+        cmd[3 + data_len] = 0x00;
+    }
+    
+    munbyn_error_t result = munbyn_write_data(handle, cmd, cmd_size);
+    
+    free(cmd);
+    return result;
+}

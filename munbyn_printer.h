@@ -162,10 +162,14 @@ typedef enum {
 
 // HRI position for barcodes
 typedef enum {
-    MUNBYN_HRI_NONE = 0,
-    MUNBYN_HRI_ABOVE = 1,
-    MUNBYN_HRI_BELOW = 2,
-    MUNBYN_HRI_BOTH = 3
+    MUNBYN_HRI_NONE = 0,               // GS H 0 - Do not print
+    MUNBYN_HRI_ABOVE = 1,              // GS H 1 - Above the bar code
+    MUNBYN_HRI_BELOW = 2,              // GS H 2 - Below the bar code
+    MUNBYN_HRI_BOTH = 3,               // GS H 3 - Both above and below the bar code
+    MUNBYN_HRI_NONE_ALT = 48,          // GS H 48 - Do not print (alternative)
+    MUNBYN_HRI_ABOVE_ALT = 49,         // GS H 49 - Above the bar code (alternative)
+    MUNBYN_HRI_BELOW_ALT = 50,         // GS H 50 - Below the bar code (alternative)
+    MUNBYN_HRI_BOTH_ALT = 51           // GS H 51 - Both above and below (alternative)
 } munbyn_hri_position_t;
 
 // Optimal cutting configuration constants (based on testing)
@@ -294,6 +298,12 @@ munbyn_error_t munbyn_cancel_all_formatting(munbyn_handle_t handle);
 munbyn_error_t munbyn_set_print_direction(munbyn_handle_t handle, uint8_t direction);
 munbyn_error_t munbyn_set_relative_horizontal_position(munbyn_handle_t handle, int16_t position);
 munbyn_error_t munbyn_set_absolute_horizontal_position(munbyn_handle_t handle, uint16_t position);
+
+// Barcode operations
+munbyn_error_t munbyn_set_barcode_height(munbyn_handle_t handle, uint8_t height);
+munbyn_error_t munbyn_set_barcode_width(munbyn_handle_t handle, uint8_t width);
+munbyn_error_t munbyn_set_hri_position(munbyn_handle_t handle, munbyn_hri_position_t position);
+munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t type, const char* data);
 
 #ifdef __cplusplus
 }

@@ -37,9 +37,13 @@ CODEPAGE_TABLE_EXAMPLE = codepage_table_example
 CODEPAGE_TABLE_EXAMPLE_SOURCES = codepage_table_example.c
 TEXT_FORMATTING_EXAMPLE = text_formatting_example
 TEXT_FORMATTING_EXAMPLE_SOURCES = text_formatting_example.c
+BARCODE_EXAMPLE = barcode_example
+BARCODE_EXAMPLE_SOURCES = barcode_example.c
+COMPREHENSIVE_BARCODE_EXAMPLE = comprehensive_barcode_example
+COMPREHENSIVE_BARCODE_EXAMPLE_SOURCES = comprehensive_barcode_example.c
 
 # Default target
-all: $(LIBRARY) $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE)
+all: $(LIBRARY) $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE) $(BARCODE_EXAMPLE) $(COMPREHENSIVE_BARCODE_EXAMPLE)
 
 # Static library
 $(LIBRARY): $(OBJECTS)
@@ -66,13 +70,19 @@ $(CODEPAGE_TABLE_EXAMPLE): $(CODEPAGE_TABLE_EXAMPLE_SOURCES) $(LIBRARY)
 $(TEXT_FORMATTING_EXAMPLE): $(TEXT_FORMATTING_EXAMPLE_SOURCES) $(LIBRARY)
 	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
 
+$(BARCODE_EXAMPLE): $(BARCODE_EXAMPLE_SOURCES) $(LIBRARY)
+	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+
+$(COMPREHENSIVE_BARCODE_EXAMPLE): $(COMPREHENSIVE_BARCODE_EXAMPLE_SOURCES) $(LIBRARY)
+	$(CC) $(CFLAGS) -o $@ $< -L. -lmunbyn $(LDFLAGS)
+
 # Object files
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -fPIC -c $< -o $@
 
 # Clean
 clean:
-	rm -f $(OBJECTS) $(LIBRARY) $(SHARED_LIB) $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE)
+	rm -f $(OBJECTS) $(LIBRARY) $(SHARED_LIB) $(EXAMPLE) $(FEED_TEST) $(CHARSET_EXAMPLE) $(CODEPAGE_TABLE_EXAMPLE) $(TEXT_FORMATTING_EXAMPLE) $(BARCODE_EXAMPLE) $(COMPREHENSIVE_BARCODE_EXAMPLE)
 
 # Install (Linux/Mac)
 install: $(LIBRARY) $(SHARED_LIB)
@@ -99,6 +109,8 @@ help:
 	@echo "  $(CHARSET_EXAMPLE) - Build character set example program"
 	@echo "  $(CODEPAGE_TABLE_EXAMPLE) - Build codepage table generator"
 	@echo "  $(TEXT_FORMATTING_EXAMPLE) - Build text formatting demo program"
+	@echo "  $(BARCODE_EXAMPLE) - Build barcode demo program"
+	@echo "  $(COMPREHENSIVE_BARCODE_EXAMPLE) - Build comprehensive barcode test"
 	@echo "  clean       - Remove build files"
 	@echo "  install     - Install library system-wide (Linux/Mac)"
 	@echo "  uninstall   - Remove installed library (Linux/Mac)"
