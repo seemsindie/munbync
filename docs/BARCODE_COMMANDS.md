@@ -46,7 +46,7 @@ munbyn_print_barcode(handle, MUNBYN_BARCODE_JAN13, "1234567890128");
 munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE128, "MunbynPrinter2024");
 ```
 
-## HRI Position Options
+## HRI Position and Font Options
 
 HRI (Human Readable Interpretation) is the text representation of the barcode data:
 
@@ -54,6 +54,20 @@ HRI (Human Readable Interpretation) is the text representation of the barcode da
 - `MUNBYN_HRI_ABOVE` - HRI text above the barcode
 - `MUNBYN_HRI_BELOW` - HRI text below the barcode
 - `MUNBYN_HRI_BOTH` - HRI text both above and below
+
+### HRI Font
+
+Select the typeface used for HRI characters when printing barcodes (GS f n):
+
+- `MUNBYN_HRI_FONT_STANDARD` (n = 0 or 48): Standard ASCII characters (12 × 24)
+- `MUNBYN_HRI_FONT_COMPRESSED` (n = 1 or 49): Compressed ASCII characters (9 × 17)
+
+Example:
+
+```c
+// Use compressed HRI font to save space under barcodes
+munbyn_set_hri_font(handle, MUNBYN_HRI_FONT_COMPRESSED);
+```
 
 ## Data Requirements
 

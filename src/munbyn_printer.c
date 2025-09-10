@@ -66,6 +66,7 @@ struct munbyn_printer
     int barcode_height;
     int barcode_width;
     munbyn_hri_position_t hri_position;
+    munbyn_hri_font_t hri_font;
     munbyn_codepage_t current_codepage;
     munbyn_international_charset_t current_charset;
     
@@ -436,6 +437,7 @@ munbyn_error_t munbyn_initialize(munbyn_handle_t handle)
         handle->barcode_height = 162; // Default height
         handle->barcode_width = 3;    // Default width
         handle->hri_position = MUNBYN_HRI_NONE;
+        handle->hri_font = MUNBYN_HRI_FONT_STANDARD; // Default HRI font
         handle->current_codepage = MUNBYN_CODEPAGE_PC437; // Default codepage
         handle->current_charset = MUNBYN_INTL_USA;        // Default international charset
     }
@@ -1289,6 +1291,28 @@ munbyn_error_t munbyn_set_hri_position(munbyn_handle_t handle, munbyn_hri_positi
         handle->hri_position = position;
     }
     
+    return result;
+}
+
+munbyn_error_t munbyn_set_hri_font(munbyn_handle_t handle, munbyn_hri_font_t font)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // GS f n - Select font for HRI characters used when printing a barcode
+    // n = 0,48: Standard ASCII (12×24)
+    // n = 1,49: Compressed ASCII (9×17)
+    if (!(font == MUNBYN_HRI_FONT_STANDARD || font == MUNBYN_HRI_FONT_COMPRESSED ||
+          font == MUNBYN_HRI_FONT_STANDARD_ALT || font == MUNBYN_HRI_FONT_COMPRESSED_ALT)) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    uint8_t cmd[] = {GS, 0x66, (uint8_t)font};
+    munbyn_error_t result = munbyn_write_data(handle, cmd, sizeof(cmd));
+    if (result == MUNBYN_OK) {
+        handle->hri_font = font;
+    }
     return result;
 }
 

@@ -45,6 +45,14 @@ void demo_barcode_configuration(munbyn_handle_t handle) {
         return;
     }
     
+    // Set HRI font to compressed for denser labels
+    printf("Setting HRI font to compressed...\n");
+    result = munbyn_set_hri_font(handle, MUNBYN_HRI_FONT_COMPRESSED);
+    if (result != MUNBYN_OK) {
+        print_error("set_hri_font", result);
+        return;
+    }
+    
     printf("Configuration complete.\n\n");
 }
 
@@ -137,6 +145,14 @@ void demo_code128_barcode(munbyn_handle_t handle) {
         print_error("set_hri_position", result);
         return;
     }
+
+     // Set HRI font to standard for variety
+     printf("Setting HRI font to compressed...\n");
+     result = munbyn_set_hri_font(handle, MUNBYN_HRI_FONT_STANDARD);
+     if (result != MUNBYN_OK) {
+         print_error("set_hri_font", result);
+         return;
+     }
     
     // Print regular text
     result = munbyn_write_data(handle, (const uint8_t*)text, strlen(text));

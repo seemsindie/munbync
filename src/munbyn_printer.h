@@ -172,6 +172,14 @@ typedef enum {
     MUNBYN_HRI_BOTH_ALT = 51           // GS H 51 - Both above and below (alternative)
 } munbyn_hri_position_t;
 
+// HRI font for barcodes (GS f n)
+typedef enum {
+    MUNBYN_HRI_FONT_STANDARD = 0,        // GS f 0/48 - Standard ASCII (12×24)
+    MUNBYN_HRI_FONT_COMPRESSED = 1,      // GS f 1/49 - Compressed ASCII (9×17)
+    MUNBYN_HRI_FONT_STANDARD_ALT = 48,   // GS f 48 - Standard ASCII (12×24)
+    MUNBYN_HRI_FONT_COMPRESSED_ALT = 49  // GS f 49 - Compressed ASCII (9×17)
+} munbyn_hri_font_t;
+
 // Optimal cutting configuration constants (based on testing)
 #define MUNBYN_OPTIMAL_FEED_LINES     7    // Provides best symmetrical cutting
 #define MUNBYN_ACCEPTABLE_FEED_LINES  6    // Alternative if 7 lines too much spacing
@@ -306,6 +314,7 @@ munbyn_error_t munbyn_set_absolute_horizontal_position(munbyn_handle_t handle, u
 munbyn_error_t munbyn_set_barcode_height(munbyn_handle_t handle, uint8_t height);
 munbyn_error_t munbyn_set_barcode_width(munbyn_handle_t handle, uint8_t width);
 munbyn_error_t munbyn_set_hri_position(munbyn_handle_t handle, munbyn_hri_position_t position);
+munbyn_error_t munbyn_set_hri_font(munbyn_handle_t handle, munbyn_hri_font_t font);
 munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t type, const char* data);
 
 #ifdef __cplusplus
