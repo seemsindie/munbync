@@ -7,12 +7,18 @@
 // Platform-specific includes
 #ifdef _WIN32
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #else
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>
 #include <sys/select.h>
 #include <sys/time.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <errno.h>
 #endif
 
@@ -156,6 +162,56 @@ static munbyn_error_t open_usb_port(munbyn_handle_t handle)
     return MUNBYN_OK;
 }
 
+static munbyn_error_t open_network_connection(munbyn_handle_t handle)
+{
+    struct sockaddr_in server_addr;
+    struct timeval timeout;
+    
+    // Create socket
+    handle->transport.network.socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (handle->transport.network.socket_fd < 0) {
+        return MUNBYN_ERROR_COMMUNICATION;
+    }
+    
+    // Set socket timeout if specified
+    if (handle->transport.network.timeout_ms > 0) {
+        timeout.tv_sec = handle->transport.network.timeout_ms / 1000;
+        timeout.tv_usec = (handle->transport.network.timeout_ms % 1000) * 1000;
+        
+        if (setsockopt(handle->transport.network.socket_fd, SOL_SOCKET, SO_RCVTIMEO, 
+                       &timeout, sizeof(timeout)) < 0) {
+            close(handle->transport.network.socket_fd);
+            return MUNBYN_ERROR_COMMUNICATION;
+        }
+        
+        if (setsockopt(handle->transport.network.socket_fd, SOL_SOCKET, SO_SNDTIMEO, 
+                       &timeout, sizeof(timeout)) < 0) {
+            close(handle->transport.network.socket_fd);
+            return MUNBYN_ERROR_COMMUNICATION;
+        }
+    }
+    
+    // Setup server address
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(handle->transport.network.port);
+    
+    // Convert IP address
+    if (inet_pton(AF_INET, handle->transport.network.ip_address, &server_addr.sin_addr) <= 0) {
+        close(handle->transport.network.socket_fd);
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    
+    // Connect to server
+    if (connect(handle->transport.network.socket_fd, (struct sockaddr*)&server_addr, 
+                sizeof(server_addr)) < 0) {
+        close(handle->transport.network.socket_fd);
+        return MUNBYN_ERROR_COMMUNICATION;
+    }
+    
+    return MUNBYN_OK;
+}
+
 #endif
 
 // Core API Implementation
@@ -195,8 +251,17 @@ munbyn_error_t munbyn_open(const munbyn_connection_params_t* params, munbyn_hand
             break;
 
         case MUNBYN_CONNECTION_NETWORK:
+            strncpy(printer->transport.network.ip_address, params->config.network.ip_address, 
+                    sizeof(printer->transport.network.ip_address) - 1);
+            printer->transport.network.port = params->config.network.port;
+            printer->transport.network.timeout_ms = params->config.network.timeout_ms;
+#ifndef _WIN32
+            result = open_network_connection(printer);
+#endif
+            break;
+            
         case MUNBYN_CONNECTION_BLUETOOTH:
-            // TODO: Implement network and bluetooth transports
+            // TODO: Implement bluetooth transport
             result = MUNBYN_ERROR_INVALID_PARAMETER;
             break;
 
@@ -239,8 +304,15 @@ munbyn_error_t munbyn_close(munbyn_handle_t handle)
             break;
 
         case MUNBYN_CONNECTION_NETWORK:
+#ifndef _WIN32
+            if (handle->transport.network.socket_fd != -1) {
+                close(handle->transport.network.socket_fd);
+            }
+#endif
+            break;
+            
         case MUNBYN_CONNECTION_BLUETOOTH:
-            // TODO: Implement close for network and bluetooth
+            // TODO: Implement close for bluetooth
             break;
     }
 
@@ -276,6 +348,21 @@ munbyn_error_t munbyn_open_serial(const char* port_name, int baud_rate, munbyn_h
     return munbyn_open(&params, handle);
 }
 
+munbyn_error_t munbyn_open_network(const char* ip_address, int port, int timeout_ms, munbyn_handle_t* handle)
+{
+    if (!ip_address || !handle || port <= 0 || port > 65535) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    munbyn_connection_params_t params = {0};
+    params.type = MUNBYN_CONNECTION_NETWORK;
+    strncpy(params.config.network.ip_address, ip_address, sizeof(params.config.network.ip_address) - 1);
+    params.config.network.port = port;
+    params.config.network.timeout_ms = timeout_ms;
+
+    return munbyn_open(&params, handle);
+}
+
 munbyn_error_t munbyn_write_data(munbyn_handle_t handle, const uint8_t* data, size_t length)
 {
     if (!handle || !handle->initialized || !data || length == 0) {
@@ -295,6 +382,12 @@ munbyn_error_t munbyn_write_data(munbyn_handle_t handle, const uint8_t* data, si
             fd = handle->transport.serial.fd;
 #endif
             break;
+            
+        case MUNBYN_CONNECTION_NETWORK:
+#ifndef _WIN32
+            fd = handle->transport.network.socket_fd;
+#endif
+            break;
 
         default:
             return MUNBYN_ERROR_INVALID_PARAMETER;
@@ -305,7 +398,12 @@ munbyn_error_t munbyn_write_data(munbyn_handle_t handle, const uint8_t* data, si
         return MUNBYN_ERROR_INVALID_HANDLE;
     }
 
-    ssize_t bytes_written = write(fd, data, length);
+    ssize_t bytes_written;
+    if (handle->transport_type == MUNBYN_CONNECTION_NETWORK) {
+        bytes_written = send(fd, data, length, 0);
+    } else {
+        bytes_written = write(fd, data, length);
+    }
     if (bytes_written != (ssize_t)length) {
         return MUNBYN_ERROR_COMMUNICATION;
     }
@@ -333,6 +431,12 @@ munbyn_error_t munbyn_read_data(munbyn_handle_t handle, uint8_t* buffer, size_t 
             fd = handle->transport.serial.fd;
 #endif
             break;
+            
+        case MUNBYN_CONNECTION_NETWORK:
+#ifndef _WIN32
+            fd = handle->transport.network.socket_fd;
+#endif
+            break;
 
         default:
             return MUNBYN_ERROR_INVALID_PARAMETER;
@@ -343,7 +447,12 @@ munbyn_error_t munbyn_read_data(munbyn_handle_t handle, uint8_t* buffer, size_t 
         return MUNBYN_ERROR_INVALID_HANDLE;
     }
 
-    ssize_t result = read(fd, buffer, buffer_size);
+    ssize_t result;
+    if (handle->transport_type == MUNBYN_CONNECTION_NETWORK) {
+        result = recv(fd, buffer, buffer_size, 0);
+    } else {
+        result = read(fd, buffer, buffer_size);
+    }
     if (result < 0) {
         *bytes_read = 0;
         return MUNBYN_ERROR_COMMUNICATION;

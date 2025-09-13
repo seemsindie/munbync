@@ -247,6 +247,7 @@ munbyn_error_t munbyn_close(munbyn_handle_t handle);
 // Convenience functions for specific transports
 munbyn_error_t munbyn_open_usb(const char* device_path, munbyn_handle_t* handle);
 munbyn_error_t munbyn_open_serial(const char* port_name, int baud_rate, munbyn_handle_t* handle);
+munbyn_error_t munbyn_open_network(const char* ip_address, int port, int timeout_ms, munbyn_handle_t* handle);
 
 // Common operations
 munbyn_error_t munbyn_write_data(munbyn_handle_t handle, const uint8_t* data, size_t length);
