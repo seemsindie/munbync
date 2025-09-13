@@ -189,7 +189,12 @@ typedef enum {
     MUNBYN_IMAGE_NORMAL = 0,
     MUNBYN_IMAGE_DOUBLE_WIDTH = 1,
     MUNBYN_IMAGE_DOUBLE_HEIGHT = 2,
-    MUNBYN_IMAGE_QUADRUPLE = 3
+    MUNBYN_IMAGE_QUADRUPLE = 3,
+    // Alternative values supported by some firmware
+    MUNBYN_IMAGE_NORMAL_ALT = 48,
+    MUNBYN_IMAGE_DOUBLE_WIDTH_ALT = 49,
+    MUNBYN_IMAGE_DOUBLE_HEIGHT_ALT = 50,
+    MUNBYN_IMAGE_QUADRUPLE_ALT = 51
 } munbyn_image_mode_t;
 
 // Printer status bits
@@ -316,6 +321,18 @@ munbyn_error_t munbyn_set_barcode_width(munbyn_handle_t handle, uint8_t width);
 munbyn_error_t munbyn_set_hri_position(munbyn_handle_t handle, munbyn_hri_position_t position);
 munbyn_error_t munbyn_set_hri_font(munbyn_handle_t handle, munbyn_hri_font_t font);
 munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t type, const char* data);
+
+// Raster bit image (GS v 0 m xL xH yL yH d1..dk)
+// The bitmap must be 1-bit-per-pixel, packed MSB-first in each byte,
+// laid out row by row from top to bottom. Each row is (width+7)/8 bytes.
+// width and height are specified in dots (pixels).
+munbyn_error_t munbyn_print_raster_image(
+    munbyn_handle_t handle,
+    munbyn_image_mode_t mode,
+    const uint8_t* bitmap,
+    uint16_t width_pixels,
+    uint16_t height_pixels
+);
 
 #ifdef __cplusplus
 }

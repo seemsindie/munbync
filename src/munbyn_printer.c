@@ -1433,3 +1433,56 @@ munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t typ
     free(cmd);
     return result;
 }
+
+// Raster bit image printing (GS v 0 m xL xH yL yH d1..dk)
+munbyn_error_t munbyn_print_raster_image(
+    munbyn_handle_t handle,
+    munbyn_image_mode_t mode,
+    const uint8_t* bitmap,
+    uint16_t width_pixels,
+    uint16_t height_pixels)
+{
+    if (!handle || !handle->initialized || !bitmap) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    if (width_pixels == 0 || height_pixels == 0) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // Validate mode per manual: 0..3 and alternative 48..51
+    if (!((mode >= MUNBYN_IMAGE_NORMAL && mode <= MUNBYN_IMAGE_QUADRUPLE) ||
+          (mode >= MUNBYN_IMAGE_NORMAL_ALT && mode <= MUNBYN_IMAGE_QUADRUPLE_ALT))) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // Number of bytes per row (rounded up to full bytes)
+    uint16_t width_bytes = (uint16_t)((width_pixels + 7) / 8);
+
+    // Total number of data bytes
+    size_t total_bytes = (size_t)width_bytes * (size_t)height_pixels;
+
+    // Build command header
+    uint8_t header[8];
+    header[0] = GS;           // 0x1D
+    header[1] = 0x76;         // 'v'
+    header[2] = 0x30;         // '0'
+    header[3] = (uint8_t)mode; // m
+    header[4] = (uint8_t)(width_bytes & 0xFF);     // xL
+    header[5] = (uint8_t)((width_bytes >> 8) & 0xFF); // xH
+    header[6] = (uint8_t)(height_pixels & 0xFF);   // yL
+    header[7] = (uint8_t)((height_pixels >> 8) & 0xFF); // yH
+
+    // Send header first
+    munbyn_error_t result = munbyn_write_data(handle, header, sizeof(header));
+    if (result != MUNBYN_OK) {
+        return result;
+    }
+
+    // Then send raster data bytes d1..dk
+    if (total_bytes == 0) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    return munbyn_write_data(handle, bitmap, total_bytes);
+}
