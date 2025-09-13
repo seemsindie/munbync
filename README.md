@@ -1,6 +1,6 @@
-# Munbyn Printer Library
+# MUNBYN ITPP047 Printer Library
 
-A C library for controlling Munbyn thermal printers, providing comprehensive support for text formatting, barcode printing, and character set management.
+A C library for controlling MUNBYN ITPP047 thermal printers, providing comprehensive support for text formatting, barcode printing, and character set management.
 
 ## Features
 
@@ -9,6 +9,7 @@ A C library for controlling Munbyn thermal printers, providing comprehensive sup
 - **Character Sets**: Support for multiple codepages and character encodings
 - **Cross-Platform**: Works on Linux, macOS, and Windows
 - **Simple API**: Easy-to-use functions for common printing tasks
+- **ITPP047 Optimized**: Specifically designed for MUNBYN ITPP047 thermal printer model
 
 ## Project Structure
 
@@ -87,10 +88,10 @@ sudo make uninstall
 #include "munbyn_printer.h"
 
 int main() {
-    // Open printer connection
+    // Open MUNBYN ITPP047 printer connection
     MunbynPrinter printer = munbyn_open("/dev/ttyUSB0", 9600);
     if (!printer) {
-        printf("Failed to open printer\n");
+        printf("Failed to open MUNBYN ITPP047 printer\n");
         return 1;
     }
     
@@ -147,6 +148,7 @@ Detailed command references are available in the `docs/` directory:
 - [`docs/TEXT_FORMATTING_COMMANDS.md`](docs/TEXT_FORMATTING_COMMANDS.md) - Text styling and formatting
 - [`docs/BARCODE_COMMANDS.md`](docs/BARCODE_COMMANDS.md) - Barcode printing commands
 - [`docs/CHARSET_COMMANDS.md`](docs/CHARSET_COMMANDS.md) - Character set handling
+- [`docs/ITPP047 Program Manual-1.00.pdf`](docs/ITPP047%20Program%20Manual-1.00.pdf) - Official MUNBYN ITPP047 programming manual
 
 ## License
 
