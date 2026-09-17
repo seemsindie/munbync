@@ -169,7 +169,7 @@ void demo_code128_barcode(munbyn_handle_t handle) {
     
     // Print CODE128 barcode
     printf("Printing CODE128 barcode: MunbynPrinter2024\n");
-    result = munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE128, "MunbynPrinter2024");
+    result = munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE128, "{BMunbynPrinter2024");
     if (result != MUNBYN_OK) {
         print_error("print_barcode CODE128", result);
         return;

@@ -33,11 +33,15 @@
   "devDependencies": {
     "@types/w3c-web-serial": "^1.0.8",
     "@types/w3c-web-usb": "^1.0.13",
+    "@zxing/library": "0.21.3",
     "typescript": "^5.7.0"
   },
   "files": [
     "dist/",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "bwip-js": "4.11.4"
+  }
 }

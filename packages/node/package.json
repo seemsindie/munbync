@@ -28,6 +28,7 @@
   "license": "MIT",
   "gypfile": true,
   "dependencies": {
+    "bwip-js": "4.11.4",
     "node-addon-api": "^8.0.0",
     "node-gyp": "^11.0.0"
   },
@@ -43,5 +44,8 @@
     "binding.gyp",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "devDependencies": {
+    "@zxing/library": "0.21.3"
+  }
 }

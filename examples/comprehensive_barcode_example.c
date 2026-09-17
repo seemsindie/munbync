@@ -207,7 +207,7 @@ void demo_code128_barcode(munbyn_handle_t handle) {
     
     // CODE128 - high density barcode
     printf("Printing CODE128 with data: MUNBYN128\n");
-    munbyn_error_t result = munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE128, "MUNBYN128");
+    munbyn_error_t result = munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE128, "{BMUNBYN128");
     if (result != MUNBYN_OK) {
         print_error("CODE128 barcode", result);
         printf("CODE128 error code: %d\n", result);

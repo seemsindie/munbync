@@ -30,6 +30,7 @@
 struct munbyn_printer
 {
     bool initialized;
+    munbyn_profile_t profile;
     munbyn_connection_t transport_type;
     
     // Transport-specific data
@@ -122,8 +123,9 @@ static munbyn_error_t open_serial_port(munbyn_handle_t handle)
         baud = B115200;
         break;
     default:
-        baud = B9600;
-        break;
+        close(handle->transport.serial.fd);
+        handle->transport.serial.fd = -1;
+        return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
     cfsetispeed(&options, baud);
@@ -709,7 +711,7 @@ munbyn_error_t munbyn_open_drawer_default(munbyn_handle_t handle, munbyn_drawer_
 
 munbyn_error_t munbyn_print_and_cut(munbyn_handle_t handle, const char* text, munbyn_cut_mode_t cut_mode)
 {
-    if (!handle || !text) {
+    if (!handle || !text || (cut_mode != 0 && cut_mode != 1 && cut_mode != 48 && cut_mode != 49)) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
     
@@ -794,8 +796,8 @@ munbyn_error_t munbyn_set_horizontal_tab_positions(munbyn_handle_t handle, const
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
-    // k must be 1..32 according to the manual. If 0, use the clear function.
-    if (count == 0 || count > 32 || positions == NULL) {
+    // The manual permits 0..32 stops; an empty list clears them.
+    if (count > 32 || (count > 0 && positions == NULL)) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
@@ -864,7 +866,7 @@ munbyn_error_t munbyn_set_codepage(munbyn_handle_t handle, munbyn_codepage_t cod
     }
 
     // Validate codepage parameter
-    if (codepage < MUNBYN_CODEPAGE_PC437 || codepage > MUNBYN_CODEPAGE_PC3041_MALTESE) {
+    if ((int)codepage < 0 || (int)codepage > 255) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
 
@@ -1516,132 +1518,7 @@ munbyn_error_t munbyn_set_hri_font(munbyn_handle_t handle, munbyn_hri_font_t fon
     return result;
 }
 
-munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t type, const char* data)
-{
-    if (!handle || !handle->initialized || !data) {
-        return MUNBYN_ERROR_INVALID_PARAMETER;
-    }
-    
-    size_t data_len = strlen(data);
-    if (data_len == 0) {
-        return MUNBYN_ERROR_INVALID_PARAMETER;
-    }
-    
-    // Validate data length based on barcode type specifications from manual
-    switch (type) {
-        case MUNBYN_BARCODE_UPC_A:
-            if (data_len != 11 && data_len != 12) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-            
-        case MUNBYN_BARCODE_UPC_E:
-            if (data_len != 11 && data_len != 12) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-            
-        case MUNBYN_BARCODE_JAN13:  // EAN13
-            if (data_len != 12 && data_len != 13) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-            
-        case MUNBYN_BARCODE_JAN8:   // EAN8
-            if (data_len != 7 && data_len != 8) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-            
-        case MUNBYN_BARCODE_CODE39:
-            if (data_len < 1 || data_len > 255) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-            
-        case MUNBYN_BARCODE_ITF:
-            // ITF requires even number of digits (even number length)
-            if (data_len < 1 || data_len > 255 || (data_len % 2) != 0) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-            
-        case MUNBYN_BARCODE_CODEBAR:
-            if (data_len < 1 || data_len > 255) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-            
-        case MUNBYN_BARCODE_CODE93:
-            if (data_len < 1 || data_len > 255) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-            
-        case MUNBYN_BARCODE_CODE128:
-            if (data_len < 2 || data_len > 255) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-
-        case MUNBYN_BARCODE_GS1_128:
-        case MUNBYN_BARCODE_GS1_DATABAR_OMNI:
-        case MUNBYN_BARCODE_GS1_DATABAR_TRUNCATED:
-        case MUNBYN_BARCODE_GS1_DATABAR_LIMITED:
-        case MUNBYN_BARCODE_GS1_DATABAR_EXPANDED:
-            if (data_len < 1 || data_len > 255) {
-                return MUNBYN_ERROR_INVALID_PARAMETER;
-            }
-            break;
-
-        default:
-            return MUNBYN_ERROR_INVALID_PARAMETER;
-    }
-    
-    uint8_t* cmd;
-    size_t cmd_size;
-    
-    // CODE93/CODE128 and the GS1 family (74-78) use method 2 (GS k m n d1...dn,
-    // function type B). The legacy types (0-6) use method 1 (GS k m d1...dk NUL).
-    if (type >= MUNBYN_BARCODE_CODE93) {
-        // Method 2: GS k m n d1...dn
-        cmd_size = 4 + data_len;  // 3 (command) + 1 (length) + data_len
-        cmd = malloc(cmd_size);
-        if (!cmd) {
-            return MUNBYN_ERROR_BUFFER_OVERFLOW;
-        }
-        
-        cmd[0] = GS;
-        cmd[1] = 0x6B;  // 'k'
-        cmd[2] = (uint8_t)type;
-        cmd[3] = (uint8_t)data_len;  // Length of data
-        
-        // Copy data (no NUL terminator for method 2)
-        memcpy(&cmd[4], data, data_len);
-    } else {
-        // Method 1: GS k m d1...dk NUL
-        cmd_size = 3 + data_len + 1;  // 3 (command) + data_len + 1 (NUL)
-        cmd = malloc(cmd_size);
-        if (!cmd) {
-            return MUNBYN_ERROR_BUFFER_OVERFLOW;
-        }
-        
-        cmd[0] = GS;
-        cmd[1] = 0x6B;  // 'k'
-        cmd[2] = (uint8_t)type;
-        
-        // Copy data
-        memcpy(&cmd[3], data, data_len);
-        
-        // Add NUL terminator
-        cmd[3 + data_len] = 0x00;
-    }
-    
-    munbyn_error_t result = munbyn_write_data(handle, cmd, cmd_size);
-
-    free(cmd);
-    return result;
-}
+#include "munbyn_barcode.inc"
 
 // ESC/POS 2D extensions; support depends on firmware (absent from the bundled manual).
 
@@ -1705,6 +1582,7 @@ munbyn_error_t munbyn_print_pdf417(munbyn_handle_t handle, const char* data,
     if (!handle || !handle->initialized || !data) {
         return MUNBYN_ERROR_INVALID_PARAMETER;
     }
+    if (handle->profile == MUNBYN_PROFILE_ITPP047_TESTED) return MUNBYN_ERROR_UNSUPPORTED;
 
     size_t data_len = strlen(data);
     if (data_len == 0 || data_len > 65532) {
@@ -2283,4 +2161,24 @@ munbyn_error_t munbyn_set_dhcp(munbyn_handle_t handle, bool enabled)
     // 1F 1B 1F 28 13 14 04 n  (n=0 DHCP on, 1 off)
     uint8_t cmd[] = {0x1F, 0x1B, 0x1F, 0x28, 0x13, 0x14, 0x04, enabled ? 0 : 1};
     return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+#include "munbyn_text.inc"
+
+munbyn_error_t munbyn_set_profile(munbyn_handle_t handle, munbyn_profile_t profile)
+{
+    if (!handle || !handle->initialized || (profile != MUNBYN_PROFILE_GENERIC &&
+        profile != MUNBYN_PROFILE_ITPP047_TESTED)) return MUNBYN_ERROR_INVALID_PARAMETER;
+    handle->profile = profile;
+    return MUNBYN_OK;
+}
+
+munbyn_error_t munbyn_define_kanji_char(munbyn_handle_t handle, uint8_t c1, uint8_t c2,
+                                      const uint8_t* data, size_t length)
+{
+    if (!handle || !handle->initialized || !data || c1 != 0xFE || c2 < 0xA1 ||
+        c2 > 0xFE || length != 72) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t command[76] = {FS, 0x32, c1, c2};
+    memcpy(command + 4, data, 72);
+    return munbyn_write_data(handle, command, sizeof(command));
 }

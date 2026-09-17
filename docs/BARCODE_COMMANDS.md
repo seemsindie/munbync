@@ -14,9 +14,9 @@ The library supports printing various barcode types with configurable height, wi
 - **EAN8/JAN8** - European Article Number (7-8 digits)
 - **CODE39** - Alphanumeric barcode (1-255 characters)
 - **ITF** - Interleaved 2 of 5 (even number of digits, 1-255 characters)
-- **CODABAR** - Used in libraries and blood banks (1-255 characters)
+- **CODABAR** - Used in libraries and blood banks (2-255 bytes including A-D start/stop)
 - **CODE93** - More compact than CODE39 (1-255 characters)
-- **CODE128** - High-density barcode (2-255 characters)
+- **CODE128** - High-density barcode (3-255 command bytes including a code-set prefix)
 
 ## Basic Usage
 
@@ -43,7 +43,7 @@ munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE39, "HELLO123");
 munbyn_print_barcode(handle, MUNBYN_BARCODE_JAN13, "1234567890128");
 
 // Print a CODE128 barcode
-munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE128, "MunbynPrinter2024");
+munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE128, "{BMunbynPrinter2024");
 ```
 
 ## HRI Position and Font Options
@@ -99,7 +99,7 @@ Each barcode type has specific data requirements:
 - **Note**: Must have even number of digits
 
 ### CODABAR
-- **Length**: 1-255 characters
+- **Length**: 2-255 bytes including start/stop
 - **Characters**: 0-9, A-D, $, +, -, ., /, :
 - **Note**: Start/stop characters (A, B, C, D) required
 
@@ -109,9 +109,37 @@ Each barcode type has specific data requirements:
 - **Note**: More compact than CODE39
 
 ### CODE128
-- **Length**: 2-255 characters
-- **Characters**: Full ASCII character set
-- **Note**: High-density barcode, good for variable-length data
+- **Length**: 3-255 command bytes; prefix alone is rejected
+- Begin with `{A`, `{B`, or `{C`. Set A accepts bytes 0-95; set B accepts 32-127;
+  set C uses binary values 0-99, each representing a digit pair.
+- Supported escapes include code-set switches, `{S` shift in A/B, `{{` for a
+  literal brace in B, and FNC1-4 (`{1`..`{4`, only FNC1 in C).
+- Use the binary API for embedded NUL; string data includes its prefix, e.g.
+  `{BTEST-1234`. Invalid or incomplete sequences are rejected before sending.
+
+### Binary data and alternate selectors
+
+Selectors 65-71 are the length-prefixed counterparts of 0-6. C constants end in
+`_B` (`MUNBYN_BARCODE_CODABAR_B` for selector 71); Node/browser export corresponding
+`BARCODE_*_B` names. CODE93 (72) and CODE128 (73) are also length-prefixed.
+
+```c
+const uint8_t data[] = {'{', 'A', 0, 'A'};
+munbyn_print_barcode_bytes(handle, MUNBYN_BARCODE_CODE128, data, sizeof(data));
+```
+
+Node accepts `printBarcode(type, Buffer)`; browser accepts
+`printBarcode(type, Uint8Array)`. Other alphabet and size constraints still apply.
+
+GS1 selectors 74-78 are extensions outside the bundled manual. Validation checks
+wire syntax, allowed characters, and basic ranges (75-77 require 13 digits; 77
+starts with 0/1). It does not validate every GS1 application identifier, semantic
+field length, date, or check digit. Applications must validate those and confirm
+firmware support.
+
+Node/browser PDF417 uses a local raster encoder by default. See
+[implementation status](IMPLEMENTATION_STATUS.md) for native-command migration,
+width options, and verified hardware behavior.
 
 ## Complete Example
 
@@ -137,8 +165,9 @@ int main() {
     // Print barcode
     munbyn_print_barcode(handle, MUNBYN_BARCODE_CODE39, "PRODUCT123");
     
-    // Feed and cut
-    munbyn_feed_and_cut(handle, 7);
+    // Feed seven text lines before cutting (feed_and_cut uses motion units).
+    munbyn_feed_lines(handle, MUNBYN_OPTIMAL_FEED_LINES);
+    munbyn_cut_paper(handle, MUNBYN_CUT_PARTIAL);
     
     // Close connection
     munbyn_close(handle);
@@ -187,10 +216,10 @@ The example program demonstrates:
 - Barcode width affects the narrow bar width in dots
 - Commands are based on ESC/POS GS h, GS w, GS H, and GS k commands
 - The library automatically validates data format for each barcode type
-- Memory is dynamically allocated for barcode commands and properly freed
+- Linear barcode frames are fully validated and assembled before sending
 - Two barcode printing methods are supported:
   - Method 1 (GS k m d1...dk NUL) - Used for barcode types 0-6
-  - Method 2 (GS k m n d1...dn) - Used for barcode types 65-73 (CODE93, CODE128)
+  - Method 2 (GS k m n d1...dn) - Types 65-73 and GS1 extensions 74-78
 - HRI supports both standard (0-3) and alternative (48-51) positioning values
 - Multi-level barcodes (UPC, EAN, CODE93, CODE128) and binary-level barcodes (CODE39, ITF, CODABAR) have different width specifications
 

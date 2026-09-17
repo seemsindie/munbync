@@ -27,7 +27,7 @@ EXAMPLES_BUILD_DIR = $(BUILD_DIR)/examples
 
 # Source files
 SOURCES = $(SRC_DIR)/munbyn_printer.c
-HEADERS = $(SRC_DIR)/munbyn_printer.h
+HEADERS = $(SRC_DIR)/munbyn_printer.h $(wildcard $(SRC_DIR)/*.inc)
 OBJECTS = $(OBJ_DIR)/munbyn_printer.o
 
 # Library

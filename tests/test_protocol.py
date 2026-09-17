@@ -5,6 +5,7 @@ Expected bytes and limits come from ITPP047 manual 1.00, sections 2.6,
 No physical printer is opened by these tests.
 """
 import ctypes as c
+import json
 import os
 import pathlib
 import pty
@@ -33,6 +34,9 @@ signatures = {
     "set_page_area": [P, U16, U16, U16, U16], "set_relative_vertical_position": [P, c.c_int16],
     "set_wifi": [P, B, B, INT], "set_dhcp": [P, c.c_bool],
     "set_font": [P, INT],
+    "set_profile": [P, INT], "print_encoded": [P, B, INT, U8],
+    "print_barcode_bytes": [P, INT, B, SIZE], "define_kanji_char": [P, U8, U8, B, SIZE],
+    "set_codepage": [P, INT], "print_and_cut": [P, B, INT],
 }
 for name, args in signatures.items():
     function = getattr(lib, "munbyn_" + name)
@@ -40,6 +44,38 @@ for name, args in signatures.items():
     function.restype = INT
 
 class ProtocolTests(unittest.TestCase):
+    def test_barcode_alphabets_and_binary_code_sets(self):
+        cases = json.loads(pathlib.Path(__file__).with_name('barcode_cases.json').read_text())
+        for case in cases:
+            payload = bytes.fromhex(case['hex']) if 'hex' in case else case['text'].encode('ascii')
+            with self.subTest(case=case):
+                result, data = self.capture(lambda h: lib.munbyn_print_barcode_bytes(h, case['type'], payload, len(payload)))
+                self.assertEqual(result, 0 if case['valid'] else -3)
+                if not case['valid']: self.assertEqual(data, b'')
+        self.assertEqual(self.capture(lambda h: lib.munbyn_print_barcode_bytes(h, 73, b'{A\0A', 4)),
+                         (0, bytes.fromhex('1d6b49047b410041')))
+
+    def test_strict_text_encoding(self):
+        samples = [('Čćšžđ', 3, 18, 'cp852'), ('ЉЊЋЂ Ј', 7, 51, 'cp1251'), ('€ £', 8, 16, 'cp1252')]
+        for text, encoding, page, codec in samples:
+            self.assertEqual(self.capture(lambda h: lib.munbyn_print_encoded(h, text.encode(), encoding, page)),
+                (0, bytes.fromhex('1c2e1b52001b74') + bytes([page]) + text.encode(codec)))
+        for malformed in [b'\xc0\xaf', b'\xe0\x80\xaf', b'\xed\xa0\x80', b'\xf4\x90\x80\x80', b'\xc4', b'\xc4A', b'\x1b@', '😀'.encode()]:
+            self.assertEqual(self.capture(lambda h: lib.munbyn_print_encoded(h, malformed, 3, 18)), (-3, b''))
+        self.assertEqual(self.capture(lambda h: lib.munbyn_set_codepage(h, 69)), (0, bytes.fromhex('1b7445')))
+
+    def test_kanji_glyph_and_native_capability_guard(self):
+        glyph = b'\x80' * 72
+        self.assertEqual(self.capture(lambda h: lib.munbyn_define_kanji_char(h, 0xfe, 0xa1, glyph, 72)),
+                         (0, bytes.fromhex('1c32fea1') + glyph))
+        for c1, c2, size in [(0xff, 0xa1, 72), (0xfe, 0xa0, 72), (0xfe, 0xff, 72), (0xfe, 0xa1, 71)]:
+            self.assertEqual(self.capture(lambda h: lib.munbyn_define_kanji_char(h, c1, c2, glyph, size)), (-3, b''))
+        def attempt(handle):
+            self.assertEqual(lib.munbyn_set_profile(handle, 1), 0)
+            return lib.munbyn_print_pdf417(handle, b'abc', 0, 1)
+        self.assertEqual(self.capture(attempt), (-7, b''))
+        self.assertEqual(self.capture(lambda h: lib.munbyn_print_and_cut(h, b'text', 99)), (-3, b''))
+
     def capture(self, action, initial=b""):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "capture"

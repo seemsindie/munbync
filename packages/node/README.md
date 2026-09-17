@@ -35,8 +35,32 @@ API name for the manual's **hex-dump mode** command (`n=0`, `m=1`); it is not th
 proprietary `selfTest()`. `realtimeDrawerPulse()` defaults to one 100 ms unit.
 Avoid configuring Wi-Fi through the connection being reconfigured.
 
-Native PDF417 did not render a barcode on the tested ITPP047 firmware; it printed
-command text. The native PDF417 API is experimental and should only be used with
-firmware known to support it. For that printer, encode PDF417 externally and send
-it using the raster-image API. The live receipt tool skips native PDF417 unless
-`--native-pdf417` is explicitly requested.
+`printPdf417(data, columns = 0, ecLevel = 1)` now prints a locally encoded raster
+using `bwip-js`. `printPdf417Raster(data, options)` and exported `encodePdf417`
+also accept binary `Uint8Array`/`Buffer`; options include `columns`, `ecLevel`
+(default 2), `moduleSize` (default 2), and `maxWidth` (default 512 dots).
+Strings use UTF-8 with an explicit ECI marker. No remote encoder is used.
+
+The default `itpp047-tested` profile blocks native PDF417 because the tested
+printer printed command text. Native output requires an explicit
+`new MunbynPrinter({ profile: 'generic' })` and `printPdf417Native()`; generic
+means unverified, not guaranteed support. `profile` and `capabilities` describe
+the selected local policy, not detected firmware. The live receipt includes
+raster PDF417; `--native-pdf417` adds the native diagnostic.
+
+For non-ASCII text, use `printEncoded('Čćšžđ\n', 'cp852', 18)` **only if the
+printer's code-page sheet identifies selector 18 as CP852**. `print()` retains
+raw UTF-8 behavior. `printEncoded()` rejects invalid/unrepresentable text, exits
+Kanji mode, selects the USA international set, and selects the explicit table
+before sending encoded bytes. Exported `codepageProfiles` distinguishes manual
+selectors from retained legacy numbers; neither detects your firmware.
+
+`printBarcode(type, Buffer)` supports binary payloads, including CODE128 set A/C
+and CODE93 NUL. String CODE128 needs its code-set prefix, e.g. `{BTEST-1234`.
+Numeric arguments reject fractions and overflow. `defineKanjiChar(c1, c2, data)`
+defines a 72-byte glyph (`c1=0xFE`, `c2=0xA1..0xFE`).
+
+The terminal uses ASCII initially. `encoding cp852 18` selects an explicit
+encoding/table for `print` and `println`; choose the selector from the unit's
+sheet. `cut partial` and `cut one-point` describe the manual's cutter behavior;
+`feedcut` distances are motion units, not lines.

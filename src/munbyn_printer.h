@@ -17,7 +17,8 @@ typedef enum {
     MUNBYN_ERROR_INVALID_PARAMETER = -3,
     MUNBYN_ERROR_BUFFER_OVERFLOW = -4,
     MUNBYN_ERROR_TIMEOUT = -5,
-    MUNBYN_ERROR_NOT_INITIALIZED = -6
+    MUNBYN_ERROR_NOT_INITIALIZED = -6,
+    MUNBYN_ERROR_UNSUPPORTED = -7
 } munbyn_error_t;
 
 // Print justification (ESC a n command)
@@ -75,7 +76,9 @@ typedef enum {
     MUNBYN_INTL_CHINA = 15
 } munbyn_international_charset_t;
 
-// Code pages for character set selection (ESC t n)
+// Legacy firmware code-page numbering, retained for source compatibility.
+// This is NOT the table in manual 1.00. Prefer explicit encoding + a selector
+// from the printer's code-page sheet (or MUNBYN_MANUAL_CODEPAGE_* below).
 typedef enum {
     MUNBYN_CODEPAGE_PC437 = 0,         // PC437(Std.Europe)
     MUNBYN_CODEPAGE_KATAKANA = 1,      // Katakana
@@ -147,6 +150,34 @@ typedef enum {
     MUNBYN_CODEPAGE_PC3041_MALTESE = 67   // PC3041(Maltese)
 } munbyn_codepage_t;
 
+// Selectors documented in ITPP047 Program Manual 1.00, section 2.40.
+typedef enum {
+    MUNBYN_MANUAL_CODEPAGE_CP437 = 0,
+    MUNBYN_MANUAL_CODEPAGE_CP850 = 2,
+    MUNBYN_MANUAL_CODEPAGE_WINDOWS1252 = 16,
+    MUNBYN_MANUAL_CODEPAGE_CP866 = 17,
+    MUNBYN_MANUAL_CODEPAGE_CP852 = 18,
+    MUNBYN_MANUAL_CODEPAGE_CP858 = 19
+} munbyn_manual_codepage_t;
+
+// Host-side encoding is independent of the printer's numeric code-page selector.
+typedef enum {
+    MUNBYN_ENCODING_ASCII = 0,
+    MUNBYN_ENCODING_CP437,
+    MUNBYN_ENCODING_CP850,
+    MUNBYN_ENCODING_CP852,
+    MUNBYN_ENCODING_CP858,
+    MUNBYN_ENCODING_CP866,
+    MUNBYN_ENCODING_WINDOWS1250,
+    MUNBYN_ENCODING_WINDOWS1251,
+    MUNBYN_ENCODING_WINDOWS1252
+} munbyn_text_encoding_t;
+
+typedef enum {
+    MUNBYN_PROFILE_GENERIC = 0, // Native extensions are caller-verified.
+    MUNBYN_PROFILE_ITPP047_TESTED = 1 // QR/raster verified; native PDF417 unsupported.
+} munbyn_profile_t;
+
 // Barcode types
 typedef enum {
     MUNBYN_BARCODE_UPC_A = 0,
@@ -156,6 +187,13 @@ typedef enum {
     MUNBYN_BARCODE_CODE39 = 4,
     MUNBYN_BARCODE_ITF = 5,
     MUNBYN_BARCODE_CODEBAR = 6,
+    MUNBYN_BARCODE_UPC_A_B = 65,
+    MUNBYN_BARCODE_UPC_E_B = 66,
+    MUNBYN_BARCODE_JAN13_B = 67,
+    MUNBYN_BARCODE_JAN8_B = 68,
+    MUNBYN_BARCODE_CODE39_B = 69,
+    MUNBYN_BARCODE_ITF_B = 70,
+    MUNBYN_BARCODE_CODABAR_B = 71,
     MUNBYN_BARCODE_CODE93 = 72,
     MUNBYN_BARCODE_CODE128 = 73,
     MUNBYN_BARCODE_GS1_128 = 74,
@@ -260,6 +298,13 @@ munbyn_error_t munbyn_read_data(munbyn_handle_t handle, uint8_t* buffer, size_t 
 // Requires all four valid one-byte replies; leave ASB disabled.
 // On failure, status is zeroed. Reconnect after a timeout before retrying.
 munbyn_error_t munbyn_get_status(munbyn_handle_t handle, munbyn_status_t* status);
+// Local capability policy, retained across ESC @. Does not detect/change firmware.
+munbyn_error_t munbyn_set_profile(munbyn_handle_t handle, munbyn_profile_t profile);
+// Strict UTF-8 conversion; rejects unrepresentable characters and controls other
+// than LF/CR/HT. Validates before writing, exits Kanji mode and selects USA
+// international characters plus the explicit code page for single-byte text.
+munbyn_error_t munbyn_print_encoded(munbyn_handle_t handle, const char* utf8,
+                                   munbyn_text_encoding_t encoding, uint8_t codepage);
 
 // Drawer connector pins (ESC p m command)
 typedef enum {
@@ -332,6 +377,9 @@ munbyn_error_t munbyn_set_barcode_width(munbyn_handle_t handle, uint8_t width);
 munbyn_error_t munbyn_set_hri_position(munbyn_handle_t handle, munbyn_hri_position_t position);
 munbyn_error_t munbyn_set_hri_font(munbyn_handle_t handle, munbyn_hri_font_t font);
 munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t type, const char* data);
+// Binary payloads (including NUL in CODE93/CODE128) require function-B selectors.
+munbyn_error_t munbyn_print_barcode_bytes(munbyn_handle_t handle, munbyn_barcode_t type,
+                                         const uint8_t* data, size_t length);
 
 // QR code error-correction levels (GS ( k function 069, fn='E')
 typedef enum {
@@ -467,6 +515,9 @@ munbyn_error_t munbyn_cancel_kanji(munbyn_handle_t handle);
 munbyn_error_t munbyn_set_kanji_spacing(munbyn_handle_t handle, uint8_t left, uint8_t right);
 // FS W n - turn quadruple-size Kanji mode on/off.
 munbyn_error_t munbyn_set_kanji_quad_size(munbyn_handle_t handle, bool enabled);
+// FS 2: c1=0xFE, c2=0xA1..0xFE, exactly 72 bytes for a 24x24 glyph.
+munbyn_error_t munbyn_define_kanji_char(munbyn_handle_t handle, uint8_t c1, uint8_t c2,
+                                      const uint8_t* data, size_t length);
 
 // --- Network / WiFi (vendor 1F 1B 1F commands) ---
 // NOTE: reverse-engineered from the official PrinterTest tool; not verified on

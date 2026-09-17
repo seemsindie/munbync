@@ -1,11 +1,83 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import { encodePdf417 } from '../dist/pdf417.js';
+import { codepageProfiles } from '../dist/encoding.js';
+const zxing = createRequire(import.meta.url)('@zxing/library');
 import * as cmd from '../dist/commands.js';
 import { MunbynPrinter } from '../dist/printer.js';
 import { WebSerialTransport } from '../dist/transports/webserial.js';
 import { WebUSBTransport } from '../dist/transports/webusb.js';
 
 const hex = (s) => Uint8Array.from(Buffer.from(s.replaceAll(' ', ''), 'hex'));
+
+test('barcode syntax and binary code sets match the manual fixtures', () => {
+  const cases = JSON.parse(fs.readFileSync(new URL('../../../tests/barcode_cases.json', import.meta.url), 'utf8'));
+  for (const item of cases) {
+    const payload = item.hex ? hex(item.hex) : item.text;
+    if (item.valid) assert.doesNotThrow(() => cmd.printBarcode(item.type, payload), JSON.stringify(item));
+    else assert.throws(() => cmd.printBarcode(item.type, payload), RangeError, JSON.stringify(item));
+  }
+  assert.deepEqual(cmd.printBarcode(73, hex('7b410041')), hex('1d6b49047b410041'));
+});
+
+test('old setters reject invalid numbers before writing, including multi-command receipts', async () => {
+  for (const action of [p => p.feedLines(256), p => p.feedLines(1.5), p => p.feedLines(NaN),
+    p => p.feedLines('3'), p => p.setLeftMargin(65536), p => p.setCodepage(2 ** 32),
+    p => p.setHorizontalTabPositions([8, 8]), p => p.setHorizontalTabPositions([8.5]),
+    p => p.setHorizontalTabPositions(new Array(2)), p => p.setHorizontalTabPositions([, 8]),
+    p => p.defineKanjiChar(0xfe, 0xa1, Array(72).fill(256)),
+    p => p.setRelativeHorizontalPosition(-32769), p => p.printAndCut('must not print', 99)]) {
+    const transport = statusTransport([]);
+    await assert.rejects(action(new MunbynPrinter(transport)));
+    assert.deepEqual(transport.writes, []);
+  }
+  assert.deepEqual(cmd.setHorizontalTabPositions([]), hex('1b4400'));
+});
+
+test('encoded text uses explicit code pages and rejects unrepresentable characters before output', async () => {
+  assert.equal(codepageProfiles.manual.cp852, 18);
+  assert.equal(codepageProfiles.legacy.cp852, 13);
+  assert.deepEqual(cmd.printEncoded('Čćšžđ', 'cp852', 18), hex('1c2e1b52001b7412ac86e7a7d0'));
+  assert.deepEqual(cmd.printEncoded('ЉЊЋЂ Ј', 'windows1251', 51), hex('1c2e1b52001b74338a8c8e8020a3'));
+  for (const text of ['😀', 'a\0b', '\x1b@', '\ud800']) {
+    const transport = statusTransport([]);
+    await assert.rejects(new MunbynPrinter(transport).printEncoded(text, 'cp852', 18));
+    assert.deepEqual(transport.writes, []);
+  }
+});
+
+test('public Kanji APIs and font B glyph limits work through the printer class', async () => {
+  const transport = statusTransport([]), printer = new MunbynPrinter(transport);
+  await printer.setUnderlineKanji(2);
+  await printer.defineKanjiChar(0xfe, 0xa1, new Uint8Array(72));
+  assert.deepEqual(transport.writes[0], [0x1c, 0x2d, 2]);
+  assert.equal(transport.writes[1].length, 76);
+  await assert.rejects(printer.defineKanjiChar(0xfe, 0xa1, new Uint8Array(71)));
+  await printer.setFont(1);
+  await assert.rejects(printer.defineUserDefinedChars(3, 65, 65, new Uint8Array([10, ...Array(30).fill(0)])));
+  await printer.cancelAllFormatting();
+  await printer.defineUserDefinedChars(3, 65, 65, new Uint8Array([10, ...Array(30).fill(0)]));
+});
+
+test('PDF417 raster decodes independently; default printer never sends native PDF417', async () => {
+  for (const [input, expected] of [['MUNBYNC-OK', 'MUNBYNC-OK'], ['Čćšžđ / ЉЊЋЂ / €', 'Čćšžđ / ЉЊЋЂ / €'], [new Uint8Array([65, 0, 66]), 'A\0B']]) {
+    const { bitmap, width, height } = encodePdf417(input);
+    const stride = Math.ceil(width / 8), gray = new Uint8ClampedArray(width * height);
+    assert.ok(width <= 512);
+    assert.ok(bitmap.subarray(0, stride * 4).every(b => b === 0));
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++)
+      gray[y * width + x] = bitmap[y * stride + (x >> 3)] & (128 >> (x & 7)) ? 0 : 255;
+    const binary = new zxing.BinaryBitmap(new zxing.HybridBinarizer(new zxing.RGBLuminanceSource(gray, width, height)));
+    assert.equal(new zxing.PDF417Reader().decode(binary).getText(), expected);
+  }
+  const transport = statusTransport([]), printer = new MunbynPrinter(transport);
+  await assert.rejects(printer.printPdf417Native('test'), /unsupported/);
+  assert.deepEqual(transport.writes, []);
+  await printer.printPdf417('MUNBYNC-OK');
+  assert.deepEqual(transport.writes[0].slice(0, 4), [0x1d, 0x76, 0x30, 0]);
+});
 
 test('documented command bytes and limits', () => {
   const cases = [

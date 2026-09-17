@@ -83,7 +83,7 @@ int main() {
     if (result == MUNBYN_OK) {
         result = munbyn_set_hri_position(printer, MUNBYN_HRI_BELOW);
         if (result == MUNBYN_OK) {
-            result = munbyn_print_barcode(printer, MUNBYN_BARCODE_CODE128, "Code128");
+            result = munbyn_print_barcode(printer, MUNBYN_BARCODE_CODE128, "{BCode128");
             if (result == MUNBYN_OK) {
                 printf("Barcode printed successfully!\n");
             }

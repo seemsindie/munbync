@@ -13,6 +13,8 @@ commands and parameter limits.
 - `examples/`: C examples; several print immediately when run.
 - `tests/`: protocol, timeout, and installed-package regression checks.
 - `docs/COMMAND_COVERAGE.md`: manual reconciliation, extensions, and limitations.
+- `docs/IMPLEMENTATION_STATUS.md`: completed fixes, migration examples, and remaining hardware checks.
+- `docs/ITPP047_COMMAND_MATRIX.csv`: all 73 manual command families mapped to the three APIs.
 
 ## Build and test the C library
 
@@ -104,6 +106,10 @@ and device permissions depend on the browser and OS. Browsers do not connect to
 raw printer TCP port 9100 through these transports; use the Node package for
 network printing.
 
+The browser package uses `bwip-js/browser` for local PDF417 encoding. Use a
+bundler, or the import map in `packages/web/examples/index.html` when serving
+the built modules directly.
+
 ## Command behavior
 
 Status requires all four one-byte `DLE EOT` replies. Missing or malformed replies
@@ -112,23 +118,34 @@ print successfully while status reads fail. A browser read timeout closes the
 transport to prevent late responses from contaminating the next request.
 Reconnect after a timeout, and await operations sequentially on each printer.
 
-QR, PDF417, GS1, proprietary self-test, and Wi-Fi configuration are
+Native QR/PDF417, GS1, proprietary self-test, and Wi-Fi configuration are
 firmware-dependent extensions absent from the bundled manual. Successful writes
 confirm transmission only; inspect printed output to establish firmware support.
 See [command coverage](docs/COMMAND_COVERAGE.md) before using these extensions.
 
 The C raster API requires the caller to supply a buffer of
 `((width + 7) / 8) * height` bytes. Node/browser wrappers check its length.
-Barcode/configuration string APIs use NUL termination in C and reject embedded
-NUL in the bindings; use raw byte writes for binary data. Browser text uses UTF-8; printer
-codepage selection does not transcode strings.
+Barcode string APIs reject embedded NUL in the bindings. For binary barcode
+payloads, use `munbyn_print_barcode_bytes`, Node `Buffer`, or browser `Uint8Array`.
+Payload alphabets, lengths, CODE128 sequences, and GS1 wire syntax are checked
+before sending. Applications remain responsible for GS1 application-identifier
+semantics and firmware support.
+
+`print()` retains its raw UTF-8 behavior. For printer code pages, use
+`printEncoded(text, encoding, selector)` with an explicit encoding and the
+selector from your printer's code-page sheet. Conversion rejects unrepresentable
+characters before sending. Legacy enum names do not establish the mapping on
+your firmware. See [text encoding](docs/CHARSET_COMMANDS.md).
+
+Node/browser `printPdf417()` now encodes locally and prints a raster image.
+Their default `itpp047-tested` profile blocks native PDF417, which printed command
+text on the tested unit. `printPdf417Native()` is available with an explicit
+`generic` profile for other, independently verified firmware. The C native API
+retains its behavior; opt into `MUNBYN_PROFILE_ITPP047_TESTED` to block it there.
+The live receipt includes raster PDF417; `--native-pdf417` adds the experimental
+native diagnostic. See [implementation status](docs/IMPLEMENTATION_STATUS.md)
+for migration and verification limits.
 
 ## License
 
 [MIT](LICENSE).
-
-Native PDF417 did not render a barcode on the tested ITPP047 firmware; it printed
-command text. The native PDF417 API is experimental and should only be used with
-firmware known to support it. For that printer, encode PDF417 externally and send
-it using the raster-image API. The live receipt tool skips native PDF417 unless
-`--native-pdf417` is explicitly requested.

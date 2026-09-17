@@ -194,3 +194,12 @@ export const CODEPAGE_PC3011_LAT1 = 64;
 export const CODEPAGE_PC3012_LAT2 = 65;
 export const CODEPAGE_PC3021_BULG = 66;
 export const CODEPAGE_PC3041_MALTESE = 67;
+
+// Length-prefixed barcode selectors from manual 1.00.
+export const BARCODE_UPC_A_B = 65;
+export const BARCODE_UPC_E_B = 66;
+export const BARCODE_JAN13_B = 67;
+export const BARCODE_JAN8_B = 68;
+export const BARCODE_CODE39_B = 69;
+export const BARCODE_ITF_B = 70;
+export const BARCODE_CODABAR_B = 71;

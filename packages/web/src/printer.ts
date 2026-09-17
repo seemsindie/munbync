@@ -1,13 +1,28 @@
 import type { Transport, PrinterStatus } from './types.js';
 import * as cmd from './commands.js';
 import * as C from './constants.js';
+import type { TextEncoding } from './encoding.js';
+import { encodePdf417, type Pdf417Options } from './pdf417.js';
+import { printerProfiles, type PrinterOptions, type PrinterProfile } from './profiles.js';
 
 export class MunbynPrinter {
   private transport: Transport;
+  private profileName: PrinterProfile = 'itpp047-tested';
+  private font = 0;
 
-  constructor(transport: Transport) {
+  constructor(transport: Transport, options: PrinterOptions = {}) {
     this.transport = transport;
+    this.setProfile(options.profile ?? 'itpp047-tested');
   }
+
+  setProfile(profile: PrinterProfile): this {
+    if (!Object.prototype.hasOwnProperty.call(printerProfiles, profile)) throw new RangeError('Unknown printer profile');
+    this.profileName = profile;
+    return this;
+  }
+
+  get profile(): PrinterProfile { return this.profileName; }
+  get capabilities() { return printerProfiles[this.profileName]; }
 
   get connected(): boolean {
     return this.transport.connected;
@@ -38,6 +53,7 @@ export class MunbynPrinter {
 
   async initialize(): Promise<this> {
     await this.send(cmd.initialize());
+    this.font = 0;
     return this;
   }
 
@@ -52,6 +68,11 @@ export class MunbynPrinter {
 
   async print(text: string): Promise<this> {
     await this.send(cmd.text(text));
+    return this;
+  }
+
+  async printEncoded(text: string, encoding: TextEncoding, codepage: number): Promise<this> {
+    await this.send(cmd.printEncoded(text, encoding, codepage));
     return this;
   }
 
@@ -110,9 +131,10 @@ export class MunbynPrinter {
   }
 
   async printAndCut(text: string, cutMode: number = C.CUT_PARTIAL): Promise<this> {
+    const cut = cmd.cutPaper(cutMode);
     await this.send(cmd.text(text));
     await this.send(cmd.feedLines(C.OPTIMAL_FEED_LINES));
-    await this.send(cmd.cutPaper(cutMode));
+    await this.send(cut);
     return this;
   }
 
@@ -193,11 +215,13 @@ export class MunbynPrinter {
 
   async setFont(font: number): Promise<this> {
     await this.send(cmd.setFont(font));
+    this.font = font === 1 || font === 49 ? 1 : 0;
     return this;
   }
 
   async setTextMode(modes: number): Promise<this> {
     await this.send(cmd.setTextMode(modes));
+    this.font = modes & 1;
     return this;
   }
 
@@ -218,6 +242,11 @@ export class MunbynPrinter {
 
   async setUnderline(mode: number): Promise<this> {
     await this.send(cmd.setUnderline(mode));
+    return this;
+  }
+
+  async setUnderlineKanji(mode: number): Promise<this> {
+    await this.send(cmd.setUnderlineKanji(mode));
     return this;
   }
 
@@ -298,6 +327,7 @@ export class MunbynPrinter {
     await this.send(cmd.setLineSpacingDefault());
     await this.send(cmd.setRotate90(false));
     await this.send(cmd.setUpsideDown(false));
+    this.font = 0;
     return this;
   }
 
@@ -340,7 +370,7 @@ export class MunbynPrinter {
     return this;
   }
 
-  async printBarcode(type: number, data: string): Promise<this> {
+  async printBarcode(type: number, data: string | Uint8Array): Promise<this> {
     await this.send(cmd.printBarcode(type, data));
     return this;
   }
@@ -356,7 +386,17 @@ export class MunbynPrinter {
     return this;
   }
 
-  async printPdf417(data: string, columns: number = 0, ecLevel: number = 1): Promise<this> {
+  async printPdf417(data: string | Uint8Array, columns: number = 0, ecLevel: number = 1): Promise<this> {
+    return this.printPdf417Raster(data, { columns, ecLevel });
+  }
+
+  async printPdf417Raster(data: string | Uint8Array, options: Pdf417Options = {}): Promise<this> {
+    const { bitmap, width, height } = encodePdf417(data, options);
+    return this.printRasterImage(0, bitmap, width, height);
+  }
+
+  async printPdf417Native(data: string, columns: number = 0, ecLevel: number = 1): Promise<this> {
+    if (this.capabilities.nativePdf417 === false) throw new Error('Native PDF417 is unsupported by this profile; use raster PDF417');
     await this.send(cmd.printPdf417(data, columns, ecLevel));
     return this;
   }
@@ -463,7 +503,7 @@ export class MunbynPrinter {
     c2: number,
     data: Uint8Array
   ): Promise<this> {
-    await this.send(cmd.defineUserDefinedChars(y, c1, c2, data));
+    await this.send(cmd.defineUserDefinedChars(y, c1, c2, data, this.font));
     return this;
   }
 
@@ -568,6 +608,11 @@ export class MunbynPrinter {
 
   async setKanjiQuadSize(enabled: boolean): Promise<this> {
     await this.send(cmd.setKanjiQuadSize(enabled));
+    return this;
+  }
+
+  async defineKanjiChar(c1: number, c2: number, data: Uint8Array): Promise<this> {
+    await this.send(cmd.defineKanjiChar(c1, c2, data));
     return this;
   }
 

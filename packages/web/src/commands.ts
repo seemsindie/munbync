@@ -1,3 +1,5 @@
+import { validateBarcode } from './barcode.js';
+import { encodeText, type TextEncoding } from './encoding.js';
 import { ESC, FS, GS } from './constants.js';
 
 const encoder = new TextEncoder();
@@ -50,21 +52,25 @@ export function initialize(): Uint8Array {
 
 // GS V m - Cut paper
 export function cutPaper(mode: number): Uint8Array {
+  oneOf(mode, [0, 1, 48, 49], 'cut mode');
   return bytes(GS, 0x56, mode);
 }
 
 // GS V 66 n - Feed and cut
 export function feedAndCut(feedAmount: number): Uint8Array {
+  integer(feedAmount, 0, 255, 'feedAmount');
   return bytes(GS, 0x56, 66, feedAmount & 0xff);
 }
 
 // ESC d n - Feed n lines
 export function feedLines(lines: number): Uint8Array {
+  integer(lines, 0, 255, 'lines');
   return bytes(ESC, 0x64, lines & 0xff);
 }
 
 // ESC p m t1 t2 - Open cash drawer
 export function openDrawer(pin: number, onTime: number, offTime: number): Uint8Array {
+  oneOf(pin, [0, 1, 48, 49], 'drawer pin'); integer(onTime, 0, 255, 'onTime'); integer(offTime, 0, 255, 'offTime');
   return bytes(ESC, 0x70, pin, onTime & 0xff, offTime & 0xff);
 }
 
@@ -90,6 +96,9 @@ export function horizontalTab(): Uint8Array {
 
 // ESC D n1...nk NUL - Set horizontal tab positions
 export function setHorizontalTabPositions(positions: number[]): Uint8Array {
+  if (!Array.isArray(positions)) throw new TypeError('Expected an array of tab stops');
+  if (positions.length > 32) throw new RangeError('At most 32 tab stops');
+  for (const [i, p] of positions.entries()) integer(p, i ? positions[i - 1] + 1 : 1, 255, 'tab stop');
   const cmd = new Uint8Array(2 + positions.length + 1);
   cmd[0] = ESC;
   cmd[1] = 0x44;
@@ -107,46 +116,55 @@ export function clearHorizontalTabPositions(): Uint8Array {
 
 // ESC R n - Select international character set
 export function setInternationalCharset(charset: number): Uint8Array {
+  integer(charset, 0, 15, 'charset');
   return bytes(ESC, 0x52, charset);
 }
 
 // ESC t n - Select code page
 export function setCodepage(codepage: number): Uint8Array {
+  integer(codepage, 0, 255, 'codepage');
   return bytes(ESC, 0x74, codepage);
 }
 
 // ESC a n - Set justification
 export function setJustification(justify: number): Uint8Array {
+  oneOf(justify, [0, 1, 2, 48, 49, 50], 'justification');
   return bytes(ESC, 0x61, justify);
 }
 
 // ESC M n - Select font
 export function setFont(font: number): Uint8Array {
+  oneOf(font, [0, 1, 48, 49], 'font');
   return bytes(ESC, 0x4d, font);
 }
 
 // ESC ! n - Select print mode(s)
 export function setTextMode(modes: number): Uint8Array {
+  integer(modes, 0, 255, 'modes');
   return bytes(ESC, 0x21, modes);
 }
 
 // ESC E n - Emphasis on/off
 export function setEmphasis(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(ESC, 0x45, enabled ? 1 : 0);
 }
 
 // ESC G n - Double-strike on/off
 export function setDoubleStrike(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(ESC, 0x47, enabled ? 1 : 0);
 }
 
 // ESC - n - Underline mode
 export function setUnderline(mode: number): Uint8Array {
+  oneOf(mode, [0, 1, 2, 48, 49, 50], 'underline mode');
   return bytes(ESC, 0x2d, mode);
 }
 
 // FS - n - Kanji underline mode
 export function setUnderlineKanji(mode: number): Uint8Array {
+  oneOf(mode, [0, 1, 2, 48, 49, 50], 'Kanji underline mode');
   return bytes(FS, 0x2d, mode);
 }
 
@@ -157,41 +175,49 @@ export function setLineSpacingDefault(): Uint8Array {
 
 // ESC 3 n - Set line spacing
 export function setLineSpacing(spacing: number): Uint8Array {
+  integer(spacing, 0, 255, 'spacing');
   return bytes(ESC, 0x33, spacing & 0xff);
 }
 
 // GS P x y - Set motion units
 export function setMotionUnits(horizontal: number, vertical: number): Uint8Array {
+  integer(horizontal, 0, 255, 'horizontal'); integer(vertical, 0, 255, 'vertical');
   return bytes(GS, 0x50, horizontal & 0xff, vertical & 0xff);
 }
 
 // ESC SP n - Set character spacing
 export function setCharacterSpacing(spacing: number): Uint8Array {
+  integer(spacing, 0, 255, 'spacing');
   return bytes(ESC, 0x20, spacing & 0xff);
 }
 
 // GS L nL nH - Set left margin
 export function setLeftMargin(margin: number): Uint8Array {
+  integer(margin, 0, 65535, 'margin');
   return bytes(GS, 0x4c, margin & 0xff, (margin >> 8) & 0xff);
 }
 
 // GS W nL nH - Set print area width
 export function setPrintAreaWidth(width: number): Uint8Array {
+  integer(width, 0, 65535, 'width');
   return bytes(GS, 0x57, width & 0xff, (width >> 8) & 0xff);
 }
 
 // ESC V n - Rotate 90 degrees
 export function setRotate90(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(ESC, 0x56, enabled ? 1 : 0);
 }
 
 // ESC { n - Upside-down mode
 export function setUpsideDown(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(ESC, 0x7b, enabled ? 1 : 0);
 }
 
 // GS B n - White/black reverse
 export function setInvertedText(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(GS, 0x42, enabled ? 1 : 0);
 }
 
@@ -204,11 +230,13 @@ export function setTextScale(widthScale: number, heightScale: number): Uint8Arra
 
 // ESC T n - Print direction in page mode
 export function setPrintDirection(direction: number): Uint8Array {
+  oneOf(direction, [0, 1, 2, 3, 48, 49, 50, 51], 'direction');
   return bytes(ESC, 0x54, direction);
 }
 
 // ESC \ nL nH - Relative horizontal position
 export function setRelativeHorizontalPosition(position: number): Uint8Array {
+  integer(position, -32768, 32767, 'position');
   let value: number;
   if (position >= 0) {
     value = position;
@@ -220,6 +248,7 @@ export function setRelativeHorizontalPosition(position: number): Uint8Array {
 
 // ESC $ nL nH - Absolute horizontal position
 export function setAbsoluteHorizontalPosition(position: number): Uint8Array {
+  integer(position, 0, 65535, 'position');
   return bytes(ESC, 0x24, position & 0xff, (position >> 8) & 0xff);
 }
 
@@ -237,42 +266,25 @@ export function setBarcodeWidth(width: number): Uint8Array {
 
 // GS H n - HRI position
 export function setHriPosition(position: number): Uint8Array {
+  oneOf(position, [0, 1, 2, 3, 48, 49, 50, 51], 'HRI position');
   return bytes(GS, 0x48, position);
 }
 
 // GS f n - HRI font
 export function setHriFont(font: number): Uint8Array {
+  oneOf(font, [0, 1, 48, 49], 'HRI font');
   return bytes(GS, 0x66, font);
 }
 
 // GS k - Print barcode
-export function printBarcode(type: number, data: string): Uint8Array {
-  oneOf(type, [0, 1, 2, 3, 4, 5, 6, 72, 73, 74, 75, 76, 77, 78], 'barcode type');
-  const payload = cString(data, type === 73 ? 2 : 1, 255, 'barcode data');
-  const lengths: Record<number, number[]> = {0: [11, 12], 1: [11, 12], 2: [12, 13], 3: [7, 8]};
-  if (lengths[type]) oneOf(payload.length, lengths[type], 'barcode length');
-  if (type === 5 && payload.length % 2 !== 0) throw new RangeError('ITF requires an even length');
-  const encoded = encoder.encode(data);
-
-  // CODE93/CODE128 and GS1 family (72-78) use method 2: GS k m n d1...dn
-  if (type >= 72) {
-    const cmd = new Uint8Array(4 + encoded.length);
-    cmd[0] = GS;
-    cmd[1] = 0x6b;
-    cmd[2] = type;
-    cmd[3] = encoded.length;
-    cmd.set(encoded, 4);
-    return cmd;
-  }
-
-  // Others use method 1: GS k m d1...dk NUL
-  const cmd = new Uint8Array(3 + encoded.length + 1);
-  cmd[0] = GS;
-  cmd[1] = 0x6b;
-  cmd[2] = type;
-  cmd.set(encoded, 3);
-  cmd[3 + encoded.length] = 0x00;
-  return cmd;
+export function printBarcode(type: number, data: string | Uint8Array): Uint8Array {
+  if (typeof data !== 'string' && !(data instanceof Uint8Array)) throw new TypeError('Expected string or Uint8Array');
+  if (typeof data === 'string' && data.includes('\0')) throw new RangeError('Use Uint8Array for binary barcode data');
+  const payload = typeof data === 'string' ? encoder.encode(data) : data;
+  validateBarcode(type, payload);
+  return type >= 65
+    ? concat(bytes(GS, 0x6b, type, payload.length), payload)
+    : concat(bytes(GS, 0x6b, type), payload, bytes(0));
 }
 
 // GS ( k - QR code (model 2). moduleSize 1-16, ecLevel 48-51 (L/M/Q/H).
@@ -380,12 +392,14 @@ export function setWifiStatic(
 }
 // 1F 1B 1F 28 13 14 04 n  (n=0 DHCP on, 1 off)
 export function setDhcp(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(0x1f, 0x1b, 0x1f, 0x28, 0x13, 0x14, 0x04, enabled ? 0 : 1);
 }
 
 // --- Kanji ---
 // FS ! n
 export function setKanjiMode(modes: number): Uint8Array {
+  integer(modes, 0, 255, 'modes');
   return bytes(FS, 0x21, modes & 0xff);
 }
 // FS &
@@ -398,16 +412,19 @@ export function cancelKanji(): Uint8Array {
 }
 // FS S n1 n2
 export function setKanjiSpacing(left: number, right: number): Uint8Array {
+  integer(left, 0, 255, 'left'); integer(right, 0, 255, 'right');
   return bytes(FS, 0x53, left & 0xff, right & 0xff);
 }
 // FS W n
 export function setKanjiQuadSize(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(FS, 0x57, enabled ? 1 : 0);
 }
 
 // --- Mechanism / sound / macros ---
 // ESC c 5 n - enable/disable panel buttons (LSB 0=enable, 1=disable)
 export function setPanelButtons(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(ESC, 0x63, 0x35, enabled ? 0 : 1);
 }
 // ESC B n t - buzzer (MUNBYN-specific)
@@ -448,14 +465,17 @@ export function transmitStatus(n: number): Uint8Array {
 }
 // GS a n
 export function setAsb(n: number): Uint8Array {
+  integer(n, 0, 255, 'ASB mask');
   return bytes(GS, 0x61, n & 0xff);
 }
 // ESC c 3 n
 export function setPaperEndSensors(n: number): Uint8Array {
+  integer(n, 0, 255, 'sensor mask');
   return bytes(ESC, 0x63, 0x33, n & 0xff);
 }
 // ESC c 4 n
 export function setStopPrintSensors(n: number): Uint8Array {
+  integer(n, 0, 255, 'sensor mask');
   return bytes(ESC, 0x63, 0x34, n & 0xff);
 }
 // GS ( A pL pH n m - enter hex-dump mode (manual p. 37)
@@ -467,14 +487,17 @@ export function executeTestPrint(n: number, m: number): Uint8Array {
 // --- Misc text / position / user-defined characters ---
 // ESC J n - print and feed n motion units
 export function printAndFeedUnits(units: number): Uint8Array {
+  integer(units, 0, 255, 'units');
   return bytes(ESC, 0x4a, units & 0xff);
 }
 // ESC = n - select peripheral device
 export function setPeripheralDevice(n: number): Uint8Array {
+  integer(n, 0, 255, 'peripheral mask');
   return bytes(ESC, 0x3d, n & 0xff);
 }
 // ESC % n - select/cancel user-defined character set
 export function selectUserDefinedCharset(enabled: boolean): Uint8Array {
+  if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean');
   return bytes(ESC, 0x25, enabled ? 1 : 0);
 }
 // ESC & y c1 c2 d... - define user-defined characters
@@ -482,8 +505,10 @@ export function defineUserDefinedChars(
   y: number,
   c1: number,
   c2: number,
-  data: Uint8Array
+  data: Uint8Array,
+  font: number = 0
 ): Uint8Array {
+  oneOf(font, [0, 1, 48, 49], 'font');
   oneOf(y, [3], 'character height');
   integer(c1, 32, 126, 'c1');
   integer(c2, c1, 126, 'c2');
@@ -491,7 +516,7 @@ export function defineUserDefinedChars(
   for (let c = c1; c <= c2; c++) {
     if (offset >= data.length) throw new RangeError('Missing character width');
     const width = data[offset++];
-    integer(width, 0, 12, 'character width');
+    integer(width, 0, font === 1 || font === 49 ? 9 : 12, 'character width');
     offset += width * y;
     if (offset > data.length) throw new RangeError('Incomplete character data');
   }
@@ -603,4 +628,16 @@ export function requestStatus(n: number = 1): Uint8Array {
 // Encode text to bytes
 export function text(str: string): Uint8Array {
   return encoder.encode(str);
+}
+
+export function defineKanjiChar(c1: number, c2: number, data: Uint8Array): Uint8Array {
+  oneOf(c1, [0xfe], 'Kanji first byte'); integer(c2, 0xa1, 0xfe, 'Kanji second byte');
+  if (!(data instanceof Uint8Array)) throw new TypeError('Expected a glyph Uint8Array');
+  if (data.length !== 72) throw new RangeError('Kanji glyph must contain exactly 72 bytes');
+  return concat(bytes(FS, 0x32, c1, c2), data);
+}
+
+export function printEncoded(text: string, encoding: TextEncoding, codepage: number): Uint8Array {
+  const payload = encodeText(text, encoding);
+  return concat(cancelKanji(), setInternationalCharset(0), setCodepage(codepage), payload);
 }

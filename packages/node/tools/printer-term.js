@@ -21,6 +21,9 @@
 
 const readline = require('readline');
 const { MunbynPrinter, constants } = require('../lib');
+const { encodings } = require('../lib/encoding');
+let textEncoding = 'ascii';
+let textCodepage = 0;
 
 const printer = new MunbynPrinter();
 let connection = null; // human-readable description of the active link
@@ -42,8 +45,10 @@ function onOff(token, dflt = true) {
 
 function int(token, name) {
   const n = Number(token);
-  if (!Number.isFinite(n)) throw new Error(`${name || 'value'} must be a number, got "${token}"`);
-  return n | 0;
+  if (token === undefined || String(token).trim() === '' || !Number.isSafeInteger(n)) {
+    throw new Error(`${name || 'value'} must be an integer, got "${token}"`);
+  }
+  return n;
 }
 
 function requireOpen() {
@@ -139,15 +144,15 @@ const commands = {
   },
   close: { usage: 'close', help: 'Close the current connection.',
     run: () => { printer.close(); connection = null; out('  closed'); } },
-  status: { usage: 'status', help: 'Query and print printer status (NOTE: parsing is known-buggy in the lib).',
+  status: { usage: 'status', help: 'Query all four real-time status groups; missing replies are errors.',
     run: () => { requireOpen(); out('  ' + JSON.stringify(printer.getStatus())); } },
 
   // --- core text ---
   init: { usage: 'init', help: 'Initialize the printer (ESC @).', run: () => { requireOpen(); printer.initialize(); } },
-  print: { usage: 'print <text>', help: 'Send text verbatim (no newline added).',
-    run: (a, rest) => { requireOpen(); printer.print(unescape(dequote(rest))); } },
-  println: { usage: 'println <text>', help: 'Send text followed by a newline.',
-    run: (a, rest) => { requireOpen(); printer.print(unescape(dequote(rest)) + '\n'); } },
+  print: { usage: 'print <text>', help: 'Print encoded text, default ASCII; use encoding for non-English text. No newline added.',
+    run: (a, rest) => { requireOpen(); printer.printEncoded(unescape(dequote(rest)), textEncoding, textCodepage); } },
+  println: { usage: 'println <text>', help: 'Print encoded text followed by a newline.',
+    run: (a, rest) => { requireOpen(); printer.printEncoded(unescape(dequote(rest)) + '\n', textEncoding, textCodepage); } },
   lf: { usage: 'lf', help: 'Line feed.', run: () => { requireOpen(); printer.lineFeed(); } },
   cr: { usage: 'cr', help: 'Carriage return.', run: () => { requireOpen(); printer.carriageReturn(); } },
   tab: { usage: 'tab', help: 'Horizontal tab.', run: () => { requireOpen(); printer.horizontalTab(); } },
@@ -191,8 +196,17 @@ const commands = {
     run: (a) => { requireOpen(); printer.setPrintAreaWidth(int(a[0], 'n')); } },
   charset: { usage: 'charset <n>', help: 'Set international charset (numeric).',
     run: (a) => { requireOpen(); printer.setInternationalCharset(int(a[0], 'n')); } },
+  encoding: { usage: 'encoding <name> <codepage-number>', help: 'Choose host encoding and the matching selector from your printer code-page sheet.',
+    complete: args => args.length <= 1 ? Object.keys(encodings) : [],
+    run: a => {
+      if (!Object.prototype.hasOwnProperty.call(encodings, a[0])) throw new Error('Unknown encoding');
+      const page = int(a[1], 'codepage');
+      if (page < 0 || page > 255) throw new Error('Codepage must be 0..255');
+      textEncoding = a[0]; textCodepage = page;
+      out(`  Text encoding ${textEncoding}, printer selector ${textCodepage}`);
+    } },
   codepage: { usage: 'codepage <n>', help: 'Set code page (numeric).',
-    run: (a) => { requireOpen(); printer.setCodepage(int(a[0], 'n')); } },
+    run: (a) => { requireOpen(); const page = int(a[0], 'n'); printer.setCodepage(page); textCodepage = page; } },
   reset: { usage: 'reset', help: 'Cancel all formatting.', run: () => { requireOpen(); printer.cancelAllFormatting(); } },
 
   // --- barcode ---
@@ -207,7 +221,7 @@ const commands = {
       printer.printBarcode(type, dequote(data));
     } },
   bcheight: { usage: 'bcheight <dots>', help: 'Set barcode height.', run: (a) => { requireOpen(); printer.setBarcodeHeight(int(a[0], 'height')); } },
-  bcwidth: { usage: 'bcwidth <1-6>', help: 'Set barcode module width.', run: (a) => { requireOpen(); printer.setBarcodeWidth(int(a[0], 'width')); } },
+  bcwidth: { usage: 'bcwidth <2-6>', help: 'Set barcode module width.', run: (a) => { requireOpen(); printer.setBarcodeWidth(int(a[0], 'width')); } },
   hri: { usage: 'hri <none|above|below|both>', help: 'Set HRI text position.',
     complete: (args) => (args.length <= 1 ? Object.keys(HRI_POS) : []),
     run: (a) => { requireOpen(); const p = HRI_POS[String(a[0]).toLowerCase()]; if (p === undefined) throw new Error(`bad HRI position "${a[0]}"`); printer.setHriPosition(p); } },
@@ -222,7 +236,7 @@ const commands = {
       if (!data) throw new Error('qr data is empty');
       printer.printQr(data, size);
     } },
-  pdf417: { usage: 'pdf417 <data> [columns]', help: 'Print a PDF417 2D barcode (columns 0=auto).',
+  pdf417: { usage: 'pdf417 <data> [columns]', help: 'Print a PDF417 barcode as raster (columns 0=auto); native PDF417 is unsupported on the tested unit.',
     run: (a, rest) => {
       requireOpen();
       const tokens = rest.split(/\s+/);
@@ -235,10 +249,10 @@ const commands = {
     } },
 
   // --- cut / drawer / hardware ---
-  cut: { usage: 'cut [partial|full]', help: 'Cut paper (default partial).',
-    complete: (args) => (args.length <= 1 ? ['partial', 'full'] : []),
-    run: (a) => { requireOpen(); printer.cutPaper(a[0] === 'full' ? constants.CUT_ONE_POINT_UNCUT : constants.CUT_PARTIAL); } },
-  feedcut: { usage: 'feedcut [lines]', help: 'Feed then cut.', run: (a) => { requireOpen(); printer.feedAndCut(a[0] ? int(a[0], 'lines') : 7); } },
+  cut: { usage: 'cut [partial|one-point]', help: 'Cut paper (default partial).',
+    complete: (args) => (args.length <= 1 ? ['partial', 'one-point'] : []),
+    run: (a) => { requireOpen(); if (a[0] && !['partial', 'one-point'].includes(a[0])) throw new Error('Only partial / one-point cuts are supported; there is no full cut'); printer.cutPaper(a[0] === 'one-point' ? constants.CUT_ONE_POINT_UNCUT : constants.CUT_PARTIAL); } },
+  feedcut: { usage: 'feedcut [units]', help: 'Feed to cutter plus N vertical motion units, then partially cut (not text lines).' , run: (a) => { requireOpen(); printer.feedAndCut(a[0] ? int(a[0], 'units') : 7); } },
   drawer: { usage: 'drawer [pin 2|5]', help: 'Pulse the cash drawer.', run: (a) => { requireOpen(); printer.openDrawerDefault(a[0] === '5' ? constants.DRAWER_PIN_5 : constants.DRAWER_PIN_2); } },
   selftest: { usage: 'selftest', help: 'Run the printer self-test.', run: () => { requireOpen(); printer.selfTest(); } },
   nvlogo: { usage: 'nvlogo [n] [mode]', help: 'Print NV-stored logo n (FS p).',

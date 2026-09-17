@@ -35,24 +35,18 @@ int main(void)
     munbyn_line_feed(printer);
     munbyn_line_feed(printer);
     
-    // Test different codepages
+    // Explicit conversion using manual selectors. Confirm these on the unit's sheet.
     printf("Testing PC437 codepage...\n");
-    munbyn_set_codepage(printer, MUNBYN_CODEPAGE_PC437);
-    const char* pc437_text = "PC437: àáâãäåæçèéêë";
-    munbyn_write_data(printer, (const uint8_t*)pc437_text, strlen(pc437_text));
+    result = munbyn_print_encoded(printer, "PC437: àáâäåæçèéêë",
+                                  MUNBYN_ENCODING_CP437, MUNBYN_MANUAL_CODEPAGE_CP437);
+    if (result != MUNBYN_OK) { munbyn_close(printer); return 1; }
     munbyn_carriage_return(printer);
     munbyn_line_feed(printer);
     
     printf("Testing PC850 codepage...\n");
-    munbyn_set_codepage(printer, MUNBYN_CODEPAGE_PC850);
-    const char* pc850_text = "PC850: àáâãäåæçèéêë";
-    munbyn_write_data(printer, (const uint8_t*)pc850_text, strlen(pc850_text));
-    munbyn_line_feed(printer);
-    
-    printf("Testing Hebrew codepage...\n");
-    munbyn_set_codepage(printer, MUNBYN_CODEPAGE_HEBREW);
-    const char* hebrew_text = "Hebrew characters test";
-    munbyn_write_data(printer, (const uint8_t*)hebrew_text, strlen(hebrew_text));
+    result = munbyn_print_encoded(printer, "PC850: àáâãäåæçèéêë",
+                                  MUNBYN_ENCODING_CP850, MUNBYN_MANUAL_CODEPAGE_CP850);
+    if (result != MUNBYN_OK) { munbyn_close(printer); return 1; }
     munbyn_line_feed(printer);
     
     // Test international character sets
@@ -69,7 +63,8 @@ int main(void)
     munbyn_line_feed(printer);
     
     // Display current codepage info
-    printf("Current codepage: %s\n", munbyn_get_codepage_name(MUNBYN_CODEPAGE_HEBREW));
+    printf("Current selector: %d (manual CP850; confirm on the printer sheet)\n",
+           MUNBYN_MANUAL_CODEPAGE_CP850);
     
     // Test formatting with new commands
     munbyn_line_feed(printer);

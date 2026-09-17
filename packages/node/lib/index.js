@@ -2,26 +2,46 @@ const path = require('path');
 const native = require(path.join(__dirname, '..', 'build', 'Release', 'munbync.node'));
 
 const { MunbynPrinter: NativePrinter, constants } = native;
+const { encodings, codepageProfiles } = require('./encoding');
+const { encodePdf417 } = require('./pdf417');
+const printerProfiles = Object.freeze({
+  'itpp047-tested': Object.freeze({ nativeQr: true, nativePdf417: false, raster: true }),
+  generic: Object.freeze({ nativeQr: null, nativePdf417: null, raster: null }),
+});
 
 class MunbynPrinter {
-  constructor() {
+  constructor(options = {}) {
     this._printer = new NativePrinter();
+    this.setProfile(options.profile ?? 'itpp047-tested');
   }
+
+  setProfile(profile) {
+    if (!Object.prototype.hasOwnProperty.call(printerProfiles, profile)) throw new RangeError('Unknown printer profile');
+    if (this.isOpen) this._printer.setProfile(profile === 'generic' ? 0 : 1);
+    this._profile = profile;
+    return this;
+  }
+
+  get profile() { return this._profile; }
+  get capabilities() { return printerProfiles[this._profile]; }
 
   // --- Connection ---
 
   openUsb(devicePath) {
     this._printer.openUsb(devicePath);
+    this.setProfile(this._profile);
     return this;
   }
 
   openSerial(portName, baudRate = 9600) {
     this._printer.openSerial(portName, baudRate);
+    this.setProfile(this._profile);
     return this;
   }
 
   openNetwork(ip, port = 9100, timeoutMs = 5000) {
     this._printer.openNetwork(ip, port, timeoutMs);
+    this.setProfile(this._profile);
     return this;
   }
 
@@ -48,6 +68,12 @@ class MunbynPrinter {
 
   print(text) {
     this._printer.writeData(text);
+    return this;
+  }
+
+  printEncoded(text, encoding, codepage) {
+    if (!Object.prototype.hasOwnProperty.call(encodings, encoding)) throw new RangeError('Unsupported text encoding');
+    this._printer.printEncoded(text, encodings[encoding], codepage);
     return this;
   }
 
@@ -316,6 +342,15 @@ class MunbynPrinter {
   }
 
   printPdf417(data, columns = 0, ecLevel = 1) {
+    return this.printPdf417Raster(data, { columns, ecLevel });
+  }
+
+  printPdf417Raster(data, options = {}) {
+    const { bitmap, width, height } = encodePdf417(data, options);
+    return this.printRasterImage(0, Buffer.from(bitmap), width, height);
+  }
+
+  printPdf417Native(data, columns = 0, ecLevel = 1) {
     this._printer.printPdf417(data, columns, ecLevel);
     return this;
   }
@@ -511,6 +546,11 @@ class MunbynPrinter {
     return this;
   }
 
+  defineKanjiChar(c1, c2, data) {
+    this._printer.defineKanjiChar(c1, c2, data);
+    return this;
+  }
+
   // --- Network / WiFi (vendor) ---
 
   setWifi(ssid, password, keyType = constants.WIFI_WPA_WPA2_MIXED) {
@@ -529,4 +569,4 @@ class MunbynPrinter {
   }
 }
 
-module.exports = { MunbynPrinter, constants };
+module.exports = { MunbynPrinter, constants, codepageProfiles, printerProfiles, encodePdf417 };

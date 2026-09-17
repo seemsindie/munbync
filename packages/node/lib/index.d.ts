@@ -1,3 +1,16 @@
+export type TextEncoding = 'ascii' | 'cp437' | 'cp850' | 'cp852' | 'cp858' | 'cp866' | 'windows1250' | 'windows1251' | 'windows1252';
+export type PrinterProfile = 'generic' | 'itpp047-tested';
+export interface PrinterOptions { profile?: PrinterProfile }
+export interface PrinterCapabilities { readonly nativeQr: boolean | null; readonly nativePdf417: boolean | null; readonly raster: boolean | null }
+export declare const printerProfiles: Readonly<Record<PrinterProfile, PrinterCapabilities>>;
+export declare const codepageProfiles: {
+  readonly manual: Readonly<Record<'cp437' | 'cp850' | 'cp852' | 'cp858' | 'cp866' | 'windows1252', number>>;
+  readonly legacy: Readonly<Record<Exclude<TextEncoding, 'ascii'>, number>>;
+};
+export interface Pdf417Options { columns?: number; ecLevel?: number; moduleSize?: number; maxWidth?: number }
+export interface RasterImage { bitmap: Uint8Array; width: number; height: number }
+export declare function encodePdf417(data: string | Uint8Array, options?: Pdf417Options): RasterImage;
+
 export interface PrinterStatus {
   paperPresent: boolean;
   coverClosed: boolean;
@@ -49,6 +62,14 @@ export declare const constants: {
   BARCODE_GS1_DATABAR_LIMITED: number;
   BARCODE_GS1_DATABAR_EXPANDED: number;
 
+  BARCODE_UPC_A_B: number;
+  BARCODE_UPC_E_B: number;
+  BARCODE_JAN13_B: number;
+  BARCODE_JAN8_B: number;
+  BARCODE_CODE39_B: number;
+  BARCODE_ITF_B: number;
+  BARCODE_CODABAR_B: number;
+
   // HRI position
   HRI_NONE: number;
   HRI_ABOVE: number;
@@ -84,7 +105,10 @@ export declare const constants: {
 };
 
 export declare class MunbynPrinter {
-  constructor();
+  constructor(options?: PrinterOptions);
+  setProfile(profile: PrinterProfile): this;
+  readonly profile: PrinterProfile;
+  readonly capabilities: PrinterCapabilities;
 
   /** Whether the printer connection is open */
   readonly isOpen: boolean;
@@ -99,6 +123,8 @@ export declare class MunbynPrinter {
   initialize(): this;
   writeData(data: Buffer | string): this;
   print(text: string): this;
+  /** Explicit single-byte encoding and firmware-specific selector. Rejects unsupported characters. */
+  printEncoded(text: string, encoding: TextEncoding, codepage: number): this;
   /** Read up to `length` bytes from the printer. Returns the bytes actually read. */
   readData(length: number): Buffer;
   getStatus(): PrinterStatus;
@@ -122,7 +148,7 @@ export declare class MunbynPrinter {
   // Character set
   setInternationalCharset(charset: number): this;
   setCodepage(codepage: number): this;
-  /** Look up the human-readable name of a code page constant. */
+  /** Look up a legacy code-page constant name; does not detect firmware mappings. */
   getCodepageName(codepage: number): string;
 
   // Text formatting
@@ -163,14 +189,16 @@ export declare class MunbynPrinter {
   setBarcodeWidth(width: number): this;
   setHriPosition(position: number): this;
   setHriFont(font: number): this;
-  printBarcode(type: number, data: string): this;
+  printBarcode(type: number, data: string | Buffer): this;
 
   // 2D barcodes
   /** Print a QR code (GS ( k, model 2). moduleSize 1-16, ecLevel = constants.QR_EC_*. */
   printQr(data: string, moduleSize?: number, ecLevel?: number): this;
-  /** Print a PDF417 2D barcode. columns 0=auto (else 1-30), ecLevel 0-8. */
-  /** Experimental native command; unsupported on the tested ITPP047. Use a raster encoder. */
-  printPdf417(data: string, columns?: number, ecLevel?: number): this;
+  /** Raster PDF417. columns 0=auto (else 1-30), ecLevel 0-8 (default 1). */
+  printPdf417(data: string | Uint8Array, columns?: number, ecLevel?: number): this;
+  printPdf417Raster(data: string | Uint8Array, options?: Pdf417Options): this;
+  /** Requires the generic profile and firmware known to support GS ( k PDF417. */
+  printPdf417Native(data: string, columns?: number, ecLevel?: number): this;
 
   // Image
   printRasterImage(mode: number, bitmap: Buffer, width: number, height: number): this;
@@ -230,6 +258,7 @@ export declare class MunbynPrinter {
   cancelKanji(): this;
   setKanjiSpacing(left: number, right: number): this;
   setKanjiQuadSize(enabled: boolean): this;
+  defineKanjiChar(c1: number, c2: number, data: Buffer): this;
 
   // Network / WiFi (vendor; send over USB, then power-cycle)
   /** Set WiFi SSID + password (DHCP). keyType = constants.WIFI_* (default WPA/WPA2 mixed). */

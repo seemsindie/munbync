@@ -16,6 +16,7 @@ static Napi::Value ThrowMunbynError(Napi::Env env, munbyn_error_t err) {
         case MUNBYN_ERROR_BUFFER_OVERFLOW:    msg = "Buffer overflow"; break;
         case MUNBYN_ERROR_TIMEOUT:            msg = "Timeout"; break;
         case MUNBYN_ERROR_NOT_INITIALIZED:    msg = "Printer not initialized"; break;
+        case MUNBYN_ERROR_UNSUPPORTED:        msg = "Native PDF417 is unsupported by this profile; use raster PDF417"; break;
         default:                              msg = "Unknown error"; break;
     }
     Napi::Error::New(env, msg).ThrowAsJavaScriptException();
@@ -55,6 +56,8 @@ public:
             InstanceMethod("writeData", &MunbynPrinter::WriteData),
             InstanceMethod("readData", &MunbynPrinter::ReadData),
             InstanceMethod("getStatus", &MunbynPrinter::GetStatus),
+            InstanceMethod("setProfile", &MunbynPrinter::SetProfile),
+            InstanceMethod("printEncoded", &MunbynPrinter::PrintEncoded),
 
             // Basic operations
             InstanceMethod("cutPaper", &MunbynPrinter::CutPaper),
@@ -164,6 +167,7 @@ public:
             InstanceMethod("cancelKanji", &MunbynPrinter::CancelKanji),
             InstanceMethod("setKanjiSpacing", &MunbynPrinter::SetKanjiSpacing),
             InstanceMethod("setKanjiQuadSize", &MunbynPrinter::SetKanjiQuadSize),
+            InstanceMethod("defineKanjiChar", &MunbynPrinter::DefineKanjiChar),
 
             // Network / WiFi (vendor)
             InstanceMethod("setWifi", &MunbynPrinter::SetWifi),
@@ -203,6 +207,44 @@ private:
 
     // --- Connection ---
 
+    Napi::Value SetProfile(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!CheckInteger(env, info[0], 0, 1)) return env.Undefined();
+        CHECK_RESULT(env, munbyn_set_profile(handle_, static_cast<munbyn_profile_t>(info[0].As<Napi::Number>().Int32Value())));
+        return env.Undefined();
+    }
+
+    Napi::Value PrintEncoded(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!info[0].IsString() || !CheckInteger(env, info[1], 0, 8) ||
+            !CheckInteger(env, info[2], 0, 255)) {
+            if (!env.IsExceptionPending()) Napi::TypeError::New(env, "Expected text, encoding and codepage").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        std::string text = info[0].As<Napi::String>().Utf8Value();
+        if (text.find('\0') != std::string::npos) {
+            Napi::RangeError::New(env, "Encoded text must not contain NUL").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        CHECK_RESULT(env, munbyn_print_encoded(handle_, text.c_str(),
+            static_cast<munbyn_text_encoding_t>(info[1].As<Napi::Number>().Int32Value()),
+            static_cast<uint8_t>(info[2].As<Napi::Number>().Int32Value())));
+        return env.Undefined();
+    }
+
+    Napi::Value DefineKanjiChar(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!CheckInteger(env, info[0], 0xFE, 0xFE) || !CheckInteger(env, info[1], 0xA1, 0xFE)) return env.Undefined();
+        if (!info[2].IsBuffer()) {
+            Napi::TypeError::New(env, "Expected a 72-byte glyph Buffer").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        auto data = info[2].As<Napi::Buffer<uint8_t>>();
+        CHECK_RESULT(env, munbyn_define_kanji_char(handle_, 0xFE,
+            static_cast<uint8_t>(info[1].As<Napi::Number>().Int32Value()), data.Data(), data.Length()));
+        return env.Undefined();
+    }
+
     Napi::Value OpenUsb(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
         if (handle_) {
@@ -225,6 +267,7 @@ private:
 
     Napi::Value OpenSerial(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 1 && !CheckInteger(env, info[1], 1, 115200)) return env.Undefined();
         if (handle_) {
             Napi::Error::New(env, "Printer already open").ThrowAsJavaScriptException();
             return env.Undefined();
@@ -246,6 +289,8 @@ private:
 
     Napi::Value OpenNetwork(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 1 && !CheckInteger(env, info[1], 1, 65535)) return env.Undefined();
+        if (info.Length() > 2 && !CheckInteger(env, info[2], 0, 2147483647)) return env.Undefined();
         if (handle_) {
             Napi::Error::New(env, "Printer already open").ThrowAsJavaScriptException();
             return env.Undefined();
@@ -361,6 +406,7 @@ private:
 
     Napi::Value CutPaper(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         int mode = (info.Length() > 0 && info[0].IsNumber()) ? info[0].As<Napi::Number>().Int32Value() : MUNBYN_CUT_PARTIAL;
@@ -371,6 +417,7 @@ private:
 
     Napi::Value FeedAndCut(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         int amount = (info.Length() > 0 && info[0].IsNumber()) ? info[0].As<Napi::Number>().Int32Value() : 7;
@@ -381,6 +428,7 @@ private:
 
     Napi::Value FeedLines(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -395,6 +443,7 @@ private:
 
     Napi::Value PrintAndCut(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 1 && !CheckInteger(env, info[1], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsString()) {
@@ -414,6 +463,9 @@ private:
 
     Napi::Value OpenDrawer(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
+        if (info.Length() > 1 && !CheckInteger(env, info[1], 0, 255)) return env.Undefined();
+        if (info.Length() > 2 && !CheckInteger(env, info[2], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsNumber()) {
@@ -430,6 +482,7 @@ private:
 
     Napi::Value OpenDrawerDefault(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         int pin = (info.Length() > 0 && info[0].IsNumber()) ? info[0].As<Napi::Number>().Int32Value() : MUNBYN_DRAWER_PIN_2;
@@ -486,12 +539,13 @@ private:
         }
         Napi::Array arr = info[0].As<Napi::Array>();
         uint32_t len = arr.Length();
-        if (len == 0 || len > 32) {
-            Napi::RangeError::New(env, "Positions array must have 1-32 elements").ThrowAsJavaScriptException();
+        if (len > 32) {
+            Napi::RangeError::New(env, "Positions array must have 0-32 elements").ThrowAsJavaScriptException();
             return env.Undefined();
         }
         uint8_t positions[32];
         for (uint32_t i = 0; i < len; i++) {
+            if (!CheckInteger(env, arr.Get(i), 1, 255)) return env.Undefined();
             positions[i] = static_cast<uint8_t>(arr.Get(i).As<Napi::Number>().Int32Value());
         }
         munbyn_error_t result = munbyn_set_horizontal_tab_positions(handle_, positions, len);
@@ -512,6 +566,7 @@ private:
 
     Napi::Value SetInternationalCharset(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -526,6 +581,7 @@ private:
 
     Napi::Value SetCodepage(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -540,6 +596,7 @@ private:
 
     Napi::Value GetCodepageName(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
             Napi::TypeError::New(env, "Expected (codepage: number)").ThrowAsJavaScriptException();
             return env.Undefined();
@@ -553,6 +610,7 @@ private:
 
     Napi::Value SetJustification(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -567,6 +625,7 @@ private:
 
     Napi::Value SetFont(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -581,6 +640,7 @@ private:
 
     Napi::Value SetTextMode(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -623,6 +683,7 @@ private:
 
     Napi::Value SetUnderline(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -637,6 +698,7 @@ private:
 
     Napi::Value SetUnderlineKanji(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -660,6 +722,7 @@ private:
 
     Napi::Value SetLineSpacing(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -674,6 +737,8 @@ private:
 
     Napi::Value SetMotionUnits(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
+        if (info.Length() > 1 && !CheckInteger(env, info[1], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsNumber()) {
@@ -689,6 +754,7 @@ private:
 
     Napi::Value SetCharacterSpacing(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -703,6 +769,7 @@ private:
 
     Napi::Value SetLeftMargin(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 65535)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -717,6 +784,7 @@ private:
 
     Napi::Value SetPrintAreaWidth(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 65535)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -774,6 +842,8 @@ private:
 
     Napi::Value SetTextScale(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
+        if (info.Length() > 1 && !CheckInteger(env, info[1], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsNumber()) {
@@ -800,6 +870,7 @@ private:
 
     Napi::Value SetPrintDirection(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -814,6 +885,7 @@ private:
 
     Napi::Value SetRelativeHorizontalPosition(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], -32768, 32767)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -828,6 +900,7 @@ private:
 
     Napi::Value SetAbsoluteHorizontalPosition(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 65535)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -844,6 +917,7 @@ private:
 
     Napi::Value SetBarcodeHeight(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -858,6 +932,7 @@ private:
 
     Napi::Value SetBarcodeWidth(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -872,6 +947,7 @@ private:
 
     Napi::Value SetHriPosition(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -886,6 +962,7 @@ private:
 
     Napi::Value SetHriFont(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -900,19 +977,23 @@ private:
 
     Napi::Value PrintBarcode(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
-        EnsureOpen(env);
-        if (env.IsExceptionPending()) return env.Undefined();
-        if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsString()) {
-            Napi::TypeError::New(env, "Expected (type: number, data: string)").ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
+        if (!CheckInteger(env, info[0], 0, 78)) return env.Undefined();
         int type = info[0].As<Napi::Number>().Int32Value();
-        std::string data = info[1].As<Napi::String>().Utf8Value();
-        if (data.find('\0') != std::string::npos) {
-            Napi::TypeError::New(env, "String must not contain NUL").ThrowAsJavaScriptException();
+        munbyn_error_t result;
+        if (info[1].IsBuffer()) {
+            auto data = info[1].As<Napi::Buffer<uint8_t>>();
+            result = munbyn_print_barcode_bytes(handle_, static_cast<munbyn_barcode_t>(type), data.Data(), data.Length());
+        } else if (info[1].IsString()) {
+            std::string data = info[1].As<Napi::String>().Utf8Value();
+            if (data.find('\0') != std::string::npos) {
+                Napi::RangeError::New(env, "Use Buffer for binary barcode data").ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+            result = munbyn_print_barcode(handle_, static_cast<munbyn_barcode_t>(type), data.c_str());
+        } else {
+            Napi::TypeError::New(env, "Expected barcode string or Buffer").ThrowAsJavaScriptException();
             return env.Undefined();
         }
-        munbyn_error_t result = munbyn_print_barcode(handle_, static_cast<munbyn_barcode_t>(type), data.c_str());
         CHECK_RESULT(env, result);
         return env.Undefined();
     }
@@ -1190,6 +1271,7 @@ private:
 
     Napi::Value PrintAndFeedUnits(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -1204,6 +1286,7 @@ private:
 
     Napi::Value SetPeripheralDevice(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -1316,6 +1399,7 @@ private:
 
     Napi::Value SetAsb(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -1330,6 +1414,7 @@ private:
 
     Napi::Value SetPaperEndSensors(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -1344,6 +1429,7 @@ private:
 
     Napi::Value SetStopPrintSensors(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -1443,6 +1529,7 @@ private:
 
     Napi::Value SetKanjiMode(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 1 || !info[0].IsNumber()) {
@@ -1475,6 +1562,8 @@ private:
 
     Napi::Value SetKanjiSpacing(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
+        if (info.Length() > 0 && !CheckInteger(env, info[0], 0, 255)) return env.Undefined();
+        if (info.Length() > 1 && !CheckInteger(env, info[1], 0, 255)) return env.Undefined();
         EnsureOpen(env);
         if (env.IsExceptionPending()) return env.Undefined();
         if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsNumber()) {
@@ -1631,6 +1720,14 @@ Napi::Object InitAll(Napi::Env env, Napi::Object exports) {
     constants.Set("BARCODE_GS1_DATABAR_TRUNCATED", Napi::Number::New(env, MUNBYN_BARCODE_GS1_DATABAR_TRUNCATED));
     constants.Set("BARCODE_GS1_DATABAR_LIMITED", Napi::Number::New(env, MUNBYN_BARCODE_GS1_DATABAR_LIMITED));
     constants.Set("BARCODE_GS1_DATABAR_EXPANDED", Napi::Number::New(env, MUNBYN_BARCODE_GS1_DATABAR_EXPANDED));
+
+    constants.Set("BARCODE_UPC_A_B", Napi::Number::New(env, MUNBYN_BARCODE_UPC_A_B));
+    constants.Set("BARCODE_UPC_E_B", Napi::Number::New(env, MUNBYN_BARCODE_UPC_E_B));
+    constants.Set("BARCODE_JAN13_B", Napi::Number::New(env, MUNBYN_BARCODE_JAN13_B));
+    constants.Set("BARCODE_JAN8_B", Napi::Number::New(env, MUNBYN_BARCODE_JAN8_B));
+    constants.Set("BARCODE_CODE39_B", Napi::Number::New(env, MUNBYN_BARCODE_CODE39_B));
+    constants.Set("BARCODE_ITF_B", Napi::Number::New(env, MUNBYN_BARCODE_ITF_B));
+    constants.Set("BARCODE_CODABAR_B", Napi::Number::New(env, MUNBYN_BARCODE_CODABAR_B));
 
     // HRI position
     constants.Set("HRI_NONE", Napi::Number::New(env, MUNBYN_HRI_NONE));

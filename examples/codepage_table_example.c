@@ -39,7 +39,7 @@ munbyn_error_t print_codepage_table(munbyn_handle_t printer, munbyn_codepage_t c
     // Get the codepage name and print it
     const char* codepage_name = munbyn_get_codepage_name(codepage_number);
     char codepage_info[128];
-    snprintf(codepage_info, sizeof(codepage_info), "%s  (Page %d)\n", codepage_name, (int)codepage_number);
+    snprintf(codepage_info, sizeof(codepage_info), "Selector %d; legacy name: %s\n", (int)codepage_number, codepage_name);
     result = munbyn_write_data(printer, (const uint8_t*)codepage_info, strlen(codepage_info));
     if (result != MUNBYN_OK) return result;
     
@@ -55,7 +55,10 @@ munbyn_error_t print_codepage_table(munbyn_handle_t printer, munbyn_codepage_t c
     result = munbyn_write_data(printer, (const uint8_t*)col_headers, strlen(col_headers));
     if (result != MUNBYN_OK) return result;
     
-    // CRITICAL: Set the codepage
+    // Exit multibyte mode before printing single-byte table entries.
+    result = munbyn_cancel_kanji(printer);
+    if (result != MUNBYN_OK) return result;
+    // Set the explicit table selector; firmware determines its mapping.
     result = munbyn_set_codepage(printer, codepage_number);
     if (result != MUNBYN_OK) return result;
     
@@ -119,11 +122,12 @@ int main(int argc, char* argv[])
     
     // Parse command line arguments
     if (argc >= 2) {
-        int cp = atoi(argv[1]);
-        if (cp >= 0 && cp <= 67) {
+        char* end = NULL;
+        long cp = strtol(argv[1], &end, 10);
+        if (end != argv[1] && *end == '\0' && cp >= 0 && cp <= 255) {
             codepage = (munbyn_codepage_t)cp;
         } else {
-            printf("Invalid codepage %d. Valid range: 0-67\n", cp);
+            printf("Invalid codepage selector. Valid range: 0-255\n");
             return 1;
         }
     }
@@ -133,11 +137,16 @@ int main(int argc, char* argv[])
     }
     
     if (argc >= 4) {
-        feed_lines = atoi(argv[3]);
-        if (feed_lines < 0) feed_lines = 0;
+        char* end = NULL;
+        long value = strtol(argv[3], &end, 10);
+        if (end == argv[3] || *end != '\0' || value < 0 || value > 255) {
+            printf("Invalid feed lines. Valid range: 0-255\n");
+            return 1;
+        }
+        feed_lines = (int)value;
     }
     
-    printf("Printing character table for codepage %d (%s)\n", 
+    printf("Printing character table for selector %d (legacy name: %s)\n",
            (int)codepage, munbyn_get_codepage_name(codepage));
     
     // Try to open USB printer (adjust path as needed)
@@ -172,7 +181,7 @@ int main(int argc, char* argv[])
     
     // Show available codepages if no arguments provided
     if (argc == 1) {
-        printf("\nAvailable codepages (use as first argument):\n");
+        printf("\nLegacy codepage names (firmware mappings may differ; selectors 0-255 accepted):\n");
         for (int i = 0; i <= 67; i++) {
             printf("  %2d: %s\n", i, munbyn_get_codepage_name((munbyn_codepage_t)i));
         }
