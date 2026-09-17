@@ -1,159 +1,134 @@
-# MUNBYN ITPP047 Printer Library
+# MUNBYN ITPP047 printer library
 
-A C library for controlling MUNBYN ITPP047 thermal printers, providing comprehensive support for text formatting, barcode printing, and character set management.
+C library, Node.js bindings, and browser ESC/POS command builders for the MUNBYN
+ITPP047 thermal receipt printer. The bundled [programming manual, version
+1.00](docs/ITPP047%20Program%20Manual-1.00.pdf) is the reference for documented
+commands and parameter limits.
 
-## Features
+## Repository
 
-- **Text Formatting**: Font sizes, styles, alignment, rotation
-- **Barcode Support**: Multiple barcode types (Code128, EAN, QR codes, etc.)
-- **Character Sets**: Support for multiple codepages and character encodings
-- **Cross-Platform**: Works on Linux, macOS, and Windows
-- **Simple API**: Easy-to-use functions for common printing tasks
-- **ITPP047 Optimized**: Specifically designed for MUNBYN ITPP047 thermal printer model
+- `src/`: C API and USB device, serial, and IPv4 TCP transports.
+- `packages/node/`: native Node.js bindings, TypeScript declarations, and terminal.
+- `packages/web/`: browser command builders, WebSerial, and WebUSB transports.
+- `examples/`: C examples; several print immediately when run.
+- `tests/`: protocol, timeout, and installed-package regression checks.
+- `docs/COMMAND_COVERAGE.md`: manual reconciliation, extensions, and limitations.
 
-## Project Structure
+## Build and test the C library
 
-```
-munbync/
-├── src/                          # Source code
-│   ├── munbyn_printer.c         # Main library implementation
-│   └── munbyn_printer.h         # Library header file
-├── examples/                     # Example programs
-│   ├── example.c                # Basic usage example
-│   ├── barcode_example.c        # Barcode printing examples
-│   ├── text_formatting_example.c # Text formatting examples
-│   └── ...                      # Other examples
-├── docs/                         # Documentation
-│   ├── BARCODE_COMMANDS.md      # Barcode command reference
-│   ├── TEXT_FORMATTING_COMMANDS.md # Text formatting reference
-│   └── ...                      # Other documentation
-├── build/                        # Build outputs (auto-generated)
-│   ├── lib/                     # Libraries (.a, .so files)
-│   ├── examples/                # Example executables
-│   └── obj/                     # Object files
-├── Makefile                      # Build configuration
-└── README.md                     # This file
+Requires a C99 compiler, CMake 3.16+, and Python 3 for tests. Linux is the validated
+native platform. macOS uses the POSIX implementation but has not been validated
+on hardware. Windows native transports and Bluetooth are not implemented;
+opening them returns an error.
+
+```sh
+./build.sh --test
+# A build directory outside the repository also works:
+./build.sh --build-dir /tmp/munbyn-build --test
+# Static library and checks:
+./build.sh --static --no-examples --test
 ```
 
-## Building
-
-### Prerequisites
-
-- GCC compiler
-- Make
-- Standard C library
-
-### Build Commands
-
-```bash
-# Build everything (library + examples)
-make all
-
-# Build only the static library
-make library
-
-# Build only the shared library
-make shared
-
-# Build only example programs
-make examples
-
-# Clean build files
-make clean
-
-# Show all available targets
-make help
-```
-
-### Build Outputs
-
-- **Libraries**: `build/lib/libmunbyn.a` (static), `build/lib/libmunbyn.so` (shared)
-- **Examples**: `build/examples/` directory contains all example executables
-
-## Installation (Linux/macOS)
-
-```bash
-# Install system-wide
-sudo make install
-
-# Uninstall
-sudo make uninstall
-```
-
-## Usage
-
-### Basic Example
+The traditional `make all shared` builds the library and examples. CMake also
+supports installation and `find_package`; see [CMAKE.md](CMAKE.md).
 
 ```c
 #include "munbyn_printer.h"
 
-int main() {
-    // Open MUNBYN ITPP047 printer connection
-    MunbynPrinter printer = munbyn_open("/dev/ttyUSB0", 9600);
-    if (!printer) {
-        printf("Failed to open MUNBYN ITPP047 printer\n");
+int main(void) {
+    munbyn_handle_t printer = NULL;
+    if (munbyn_open_network("192.0.2.10", 9100, 2000, &printer) != MUNBYN_OK)
         return 1;
-    }
-    
-    // Print some text
-    munbyn_print_text(printer, "Hello, World!\n");
-    
-    // Print a barcode
-    munbyn_print_barcode_code128(printer, "1234567890", 50, 2, 1);
-    
-    // Feed and cut
-    munbyn_feed_lines(printer, 3);
-    munbyn_cut_paper(printer);
-    
-    // Close connection
+    munbyn_error_t result = munbyn_initialize(printer);
+    if (result == MUNBYN_OK)
+        result = munbyn_print_and_cut(printer, "Hello, world!\n", MUNBYN_CUT_PARTIAL);
     munbyn_close(printer);
-    return 0;
+    return result == MUNBYN_OK ? 0 : 1;
 }
 ```
 
-### Compiling Your Programs
+Replace the example address with the printer's IPv4 address. For USB use
+`munbyn_open_usb("/dev/usb/lp0", &printer)`; for serial use
+`munbyn_open_serial("/dev/ttyUSB0", 9600, &printer)`.
 
-After installation:
-```bash
-gcc -o myprogram myprogram.c -lmunbyn
+## Node.js
+
+Requires Node.js 18+, a C/C++ compiler, and Python for node-gyp.
+
+```sh
+npm --prefix packages/node ci
+npm --prefix packages/node test
+node packages/node/tools/printer-term.js <printer-ip>
+# Read-only live check; add --print to produce one verification receipt:
+node packages/node/tools/check-printer.js <printer-ip>
 ```
 
-Or if using the library locally:
-```bash
-gcc -Isrc -o myprogram myprogram.c -Lbuild/lib -lmunbyn
+```js
+const { MunbynPrinter } = require('./packages/node');
+const printer = new MunbynPrinter();
+try {
+  printer.openNetwork('192.0.2.10');
+  console.log(printer.getStatus());
+  printer.initialize().print('Hello, world!\n').feedLines(7).cutPaper();
+} finally {
+  printer.close();
+}
 ```
 
-## Examples
+The binding is synchronous; reads block the calling thread up to the transport
+read timeout. Use a worker thread when necessary. Rebuilding synchronizes the C
+sources into an ignored `core/` directory. `npm pack` includes those sources,
+so the package can build independently of this repository.
 
-The `examples/` directory contains several demonstration programs:
+## Browser
 
-- **`example.c`**: Basic printing and barcode operations
-- **`text_formatting_example.c`**: Text styling, fonts, and alignment
-- **`barcode_example.c`**: Various barcode types and configurations
-- **`charset_example.c`**: Character set and codepage examples
-- **`feed_test.c`**: Paper feeding and cutting operations
-
-Run the examples:
-```bash
-make examples
-./build/examples/example
-./build/examples/barcode_example
-# etc.
+```sh
+npm --prefix packages/web ci
+npm --prefix packages/web test
 ```
 
-## Documentation
+```js
+import { MunbynPrinter, WebSerialTransport } from './packages/web/dist/index.js';
+const printer = new MunbynPrinter(new WebSerialTransport({ readTimeoutMs: 1000 }));
+await printer.connect(); // Invoke from a user gesture to show the port chooser.
+try {
+  await printer.initialize();
+  await printer.print('Hello, world!\n');
+} finally {
+  await printer.disconnect();
+}
+```
 
-Detailed command references are available in the `docs/` directory:
+Serve the browser example from HTTPS or localhost. WebSerial/WebUSB availability
+and device permissions depend on the browser and OS. Browsers do not connect to
+raw printer TCP port 9100 through these transports; use the Node package for
+network printing.
 
-- [`docs/TEXT_FORMATTING_COMMANDS.md`](docs/TEXT_FORMATTING_COMMANDS.md) - Text styling and formatting
-- [`docs/BARCODE_COMMANDS.md`](docs/BARCODE_COMMANDS.md) - Barcode printing commands
-- [`docs/CHARSET_COMMANDS.md`](docs/CHARSET_COMMANDS.md) - Character set handling
-- [`docs/ITPP047 Program Manual-1.00.pdf`](docs/ITPP047%20Program%20Manual-1.00.pdf) - Official MUNBYN ITPP047 programming manual
+## Command behavior
+
+Status requires all four one-byte `DLE EOT` replies. Missing or malformed replies
+are errors, never healthy defaults. USB devices with no return channel may still
+print successfully while status reads fail. A browser read timeout closes the
+transport to prevent late responses from contaminating the next request.
+Reconnect after a timeout, and await operations sequentially on each printer.
+
+QR, PDF417, GS1, proprietary self-test, and Wi-Fi configuration are
+firmware-dependent extensions absent from the bundled manual. Successful writes
+confirm transmission only; inspect printed output to establish firmware support.
+See [command coverage](docs/COMMAND_COVERAGE.md) before using these extensions.
+
+The C raster API requires the caller to supply a buffer of
+`((width + 7) / 8) * height` bytes. Node/browser wrappers check its length.
+Barcode/configuration string APIs use NUL termination in C and reject embedded
+NUL in the bindings; use raw byte writes for binary data. Browser text uses UTF-8; printer
+codepage selection does not transcode strings.
 
 ## License
 
-This project is open source. Please refer to the LICENSE file for details.
+[MIT](LICENSE).
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
+Native PDF417 did not render a barcode on the tested ITPP047 firmware; it printed
+command text. The native PDF417 API is experimental and should only be used with
+firmware known to support it. For that printer, encode PDF417 externally and send
+it using the raster-image API. The live receipt tool skips native PDF417 unless
+`--native-pdf417` is explicitly requested.

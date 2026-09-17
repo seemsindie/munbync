@@ -1,0 +1,47 @@
+{
+  "name": "munbync",
+  "version": "1.0.0",
+  "description": "Node.js bindings for the MUNBYN ITPP047 thermal printer C library",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": {
+    "munbyn-term": "tools/printer-term.js"
+  },
+  "scripts": {
+    "install": "node scripts/sync-core.js && node-gyp rebuild",
+    "build": "node scripts/sync-core.js && node-gyp rebuild",
+    "rebuild": "node scripts/sync-core.js && node-gyp rebuild",
+    "clean": "node-gyp clean",
+    "term": "node tools/printer-term.js",
+    "prepack": "node scripts/sync-core.js",
+    "test": "node --test test/*.test.cjs"
+  },
+  "keywords": [
+    "munbyn",
+    "thermal-printer",
+    "receipt-printer",
+    "escpos",
+    "itpp047",
+    "pos",
+    "native"
+  ],
+  "license": "MIT",
+  "gypfile": true,
+  "dependencies": {
+    "node-addon-api": "^8.0.0",
+    "node-gyp": "^11.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "lib/",
+    "src/",
+    "core/",
+    "scripts/sync-core.js",
+    "tools/",
+    "binding.gyp",
+    "README.md",
+    "LICENSE"
+  ]
+}

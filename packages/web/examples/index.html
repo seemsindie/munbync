@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MUNBYN Printer — Web Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; margin-bottom: 1rem; }
+    .transport-pick { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+    button { padding: 0.5rem 1rem; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; font-size: 0.9rem; }
+    button:hover { background: #f0f0f0; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button.primary:hover { background: #1d4ed8; }
+    button.danger { background: #dc2626; color: #fff; border-color: #dc2626; }
+    button.danger:hover { background: #b91c1c; }
+    #status { margin: 1rem 0; padding: 0.75rem; border-radius: 6px; background: #f3f4f6; font-size: 0.85rem; }
+    .connected { background: #dcfce7 !important; }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+    textarea { width: 100%; height: 120px; padding: 0.5rem; font-family: monospace; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 6px; margin: 0.5rem 0; resize: vertical; }
+    label { font-size: 0.85rem; font-weight: 500; }
+    #log { margin-top: 1rem; padding: 0.75rem; background: #111; color: #4ade80; font-family: monospace; font-size: 0.8rem; border-radius: 6px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>MUNBYN ITPP047 — Web Demo</h1>
+
+  <div class="transport-pick">
+    <button id="btnSerial" class="primary">Connect via WebSerial</button>
+    <button id="btnUsb" class="primary">Connect via WebUSB</button>
+    <button id="btnDisconnect" class="danger" disabled>Disconnect</button>
+  </div>
+
+  <div id="status">Not connected</div>
+
+  <label for="receiptText">Receipt text</label>
+  <textarea id="receiptText">Hello from the browser!
+================================
+Coffee              $3.50
+Muffin              $2.75
+================================
+TOTAL               $6.25
+</textarea>
+
+  <div class="actions">
+    <button id="btnInit" disabled>Initialize</button>
+    <button id="btnPrint" disabled>Print text</button>
+    <button id="btnBold" disabled>Bold on</button>
+    <button id="btnCenter" disabled>Center</button>
+    <button id="btnLeft" disabled>Left</button>
+    <button id="btnFeed" disabled>Feed 3</button>
+    <button id="btnCut" disabled>Cut</button>
+    <button id="btnPrintAndCut" disabled>Print &amp; Cut</button>
+    <button id="btnBarcode" disabled>Barcode</button>
+    <button id="btnDrawer" disabled>Open drawer</button>
+    <button id="btnSelfTest" disabled>Self test</button>
+  </div>
+
+  <div id="log"></div>
+
+  <script type="module">
+    import { MunbynPrinter, WebSerialTransport, WebUSBTransport, constants } from '../dist/index.js';
+
+    let printer = null;
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    const actionBtns = document.querySelectorAll('.actions button');
+
+    function log(msg) {
+      logEl.textContent += msg + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setConnected(on) {
+      statusEl.textContent = on ? 'Connected' : 'Not connected';
+      statusEl.classList.toggle('connected', on);
+      document.getElementById('btnDisconnect').disabled = !on;
+      document.getElementById('btnSerial').disabled = on;
+      document.getElementById('btnUsb').disabled = on;
+      actionBtns.forEach(b => b.disabled = !on);
+    }
+
+    async function connectSerial() {
+      try {
+        const transport = new WebSerialTransport({ baudRate: 9600 });
+        printer = new MunbynPrinter(transport);
+        await printer.connect();
+        setConnected(true);
+        log('Connected via WebSerial');
+      } catch (e) { log('Error: ' + e.message); }
+    }
+
+    async function connectUsb() {
+      try {
+        const transport = new WebUSBTransport();
+        printer = new MunbynPrinter(transport);
+        await printer.connect();
+        setConnected(true);
+        log('Connected via WebUSB');
+      } catch (e) { log('Error: ' + e.message); }
+    }
+
+    async function disconnect() {
+      try {
+        await printer?.disconnect();
+        printer = null;
+        setConnected(false);
+        log('Disconnected');
+      } catch (e) { log('Error: ' + e.message); }
+    }
+
+    async function run(label, fn) {
+      try {
+        await fn();
+        log(label + ' — ok');
+      } catch (e) { log(label + ' — error: ' + e.message); }
+    }
+
+    document.getElementById('btnSerial').onclick = connectSerial;
+    document.getElementById('btnUsb').onclick = connectUsb;
+    document.getElementById('btnDisconnect').onclick = disconnect;
+    document.getElementById('btnInit').onclick = () => run('Initialize', () => printer.initialize());
+    document.getElementById('btnPrint').onclick = () => run('Print', () => printer.print(document.getElementById('receiptText').value + '\n'));
+    document.getElementById('btnBold').onclick = async () => {
+      const btn = document.getElementById('btnBold');
+      const on = btn.textContent === 'Bold on';
+      await run(on ? 'Bold on' : 'Bold off', () => printer.bold(on));
+      btn.textContent = on ? 'Bold off' : 'Bold on';
+    };
+    document.getElementById('btnCenter').onclick = () => run('Center', () => printer.align('center'));
+    document.getElementById('btnLeft').onclick = () => run('Left', () => printer.align('left'));
+    document.getElementById('btnFeed').onclick = () => run('Feed 3', () => printer.feedLines(3));
+    document.getElementById('btnCut').onclick = () => run('Cut', () => printer.cutPaper());
+    document.getElementById('btnPrintAndCut').onclick = () => run('Print & Cut', () => printer.printAndCut(document.getElementById('receiptText').value + '\n'));
+    document.getElementById('btnBarcode').onclick = () => run('Barcode', async () => {
+      await printer.setBarcodeHeight(80);
+      await printer.setBarcodeWidth(3);
+      await printer.setHriPosition(constants.HRI_BELOW);
+      await printer.printBarcode(constants.BARCODE_CODE128, '{A12345678');
+    });
+    document.getElementById('btnDrawer').onclick = () => run('Open drawer', () => printer.openDrawerDefault());
+    document.getElementById('btnSelfTest').onclick = () => run('Self test', () => printer.selfTest());
+  </script>
+</body>
+</html>

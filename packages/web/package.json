@@ -1,0 +1,43 @@
+{
+  "name": "munbync-web",
+  "version": "1.0.0",
+  "description": "Browser ESC/POS driver for MUNBYN ITPP047 thermal printers via WebSerial & WebUSB",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "munbyn",
+    "thermal-printer",
+    "receipt-printer",
+    "escpos",
+    "webserial",
+    "webusb",
+    "browser",
+    "pos",
+    "itpp047"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/w3c-web-serial": "^1.0.8",
+    "@types/w3c-web-usb": "^1.0.13",
+    "typescript": "^5.7.0"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ]
+}

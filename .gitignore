@@ -3,6 +3,13 @@
 *.a
 *.so
 /build/
+/build-*/
+node_modules/
+dist/
+packages/node/build/
+packages/node/core/
+*.tgz
+__pycache__/
 
 # Example executables
 example

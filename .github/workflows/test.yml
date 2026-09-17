@@ -1,0 +1,30 @@
+name: Build and test
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build and test shared C library
+        run: ./build.sh --build-dir build-shared --test
+      - name: Build and test static C library
+        run: ./build.sh --build-dir build-static --static --no-examples --test
+      - name: Build Make examples
+        run: make -j2 all shared BUILD_DIR=build-make
+      - name: Build and test native package
+        run: |
+          npm --prefix packages/node ci
+          npm --prefix packages/node test
+      - name: Build and test browser package
+        run: |
+          npm --prefix packages/web ci
+          npm --prefix packages/web test
+      - name: Package bindings
+        run: |
+          cd packages/node
+          npm pack
+          cd ../web
+          npm pack

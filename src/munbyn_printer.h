@@ -157,7 +157,12 @@ typedef enum {
     MUNBYN_BARCODE_ITF = 5,
     MUNBYN_BARCODE_CODEBAR = 6,
     MUNBYN_BARCODE_CODE93 = 72,
-    MUNBYN_BARCODE_CODE128 = 73
+    MUNBYN_BARCODE_CODE128 = 73,
+    MUNBYN_BARCODE_GS1_128 = 74,
+    MUNBYN_BARCODE_GS1_DATABAR_OMNI = 75,
+    MUNBYN_BARCODE_GS1_DATABAR_TRUNCATED = 76,
+    MUNBYN_BARCODE_GS1_DATABAR_LIMITED = 77,
+    MUNBYN_BARCODE_GS1_DATABAR_EXPANDED = 78
 } munbyn_barcode_t;
 
 // HRI position for barcodes
@@ -252,6 +257,8 @@ munbyn_error_t munbyn_open_network(const char* ip_address, int port, int timeout
 // Common operations
 munbyn_error_t munbyn_write_data(munbyn_handle_t handle, const uint8_t* data, size_t length);
 munbyn_error_t munbyn_read_data(munbyn_handle_t handle, uint8_t* buffer, size_t buffer_size, size_t* bytes_read);
+// Requires all four valid one-byte replies; leave ASB disabled.
+// On failure, status is zeroed. Reconnect after a timeout before retrying.
 munbyn_error_t munbyn_get_status(munbyn_handle_t handle, munbyn_status_t* status);
 
 // Drawer connector pins (ESC p m command)
@@ -269,6 +276,9 @@ munbyn_error_t munbyn_feed_and_cut(munbyn_handle_t handle, uint8_t feed_amount);
 munbyn_error_t munbyn_feed_lines(munbyn_handle_t handle, uint8_t lines);
 munbyn_error_t munbyn_open_drawer(munbyn_handle_t handle, munbyn_drawer_pin_t pin, uint8_t on_time, uint8_t off_time);
 munbyn_error_t munbyn_open_drawer_default(munbyn_handle_t handle, munbyn_drawer_pin_t pin);
+
+// System/Diagnostic operations
+munbyn_error_t munbyn_self_test(munbyn_handle_t handle);
 
 // Convenience function for optimal receipt printing and cutting
 munbyn_error_t munbyn_print_and_cut(munbyn_handle_t handle, const char* text, munbyn_cut_mode_t cut_mode);
@@ -323,6 +333,25 @@ munbyn_error_t munbyn_set_hri_position(munbyn_handle_t handle, munbyn_hri_positi
 munbyn_error_t munbyn_set_hri_font(munbyn_handle_t handle, munbyn_hri_font_t font);
 munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t type, const char* data);
 
+// QR code error-correction levels (GS ( k function 069, fn='E')
+typedef enum {
+    MUNBYN_QR_EC_L = 48,   // '0' - Low      (~7% recovery)
+    MUNBYN_QR_EC_M = 49,   // '1' - Medium   (~15% recovery)
+    MUNBYN_QR_EC_Q = 50,   // '2' - Quartile (~25% recovery)
+    MUNBYN_QR_EC_H = 51,   // '3' - High     (~30% recovery)
+} munbyn_qr_ec_t;
+
+// Firmware-dependent 2D extensions (GS ( k); absent from the bundled manual).
+// String payloads cannot contain NUL. Physical symbol capacity also depends on
+// encoding, error correction, module size and available print width.
+// QR code: module_size 1-16 (dot size), ec_level selects recovery level.
+munbyn_error_t munbyn_print_qr(munbyn_handle_t handle, const char* data,
+                               uint8_t module_size, munbyn_qr_ec_t ec_level);
+// Native PDF417 is unsupported on the tested ITPP047 firmware; use raster output.
+// PDF417: data 1..65532 bytes; columns 0 = auto (else 1-30); ec_level 0-8.
+munbyn_error_t munbyn_print_pdf417(munbyn_handle_t handle, const char* data,
+                                   uint8_t columns, uint8_t ec_level);
+
 // Raster bit image (GS v 0 m xL xH yL yH d1..dk)
 // The bitmap must be 1-bit-per-pixel, packed MSB-first in each byte,
 // laid out row by row from top to bottom. Each row is (width+7)/8 bytes.
@@ -334,6 +363,144 @@ munbyn_error_t munbyn_print_raster_image(
     uint16_t width_pixels,
     uint16_t height_pixels
 );
+
+// --- Other bit-image commands ---
+
+// ESC * m nL nH d1..dk - Select bit-image mode (column format).
+// mode: 0/1 = 8-dot single/double density (1 byte per column),
+//       32/33 = 24-dot single/double density (3 bytes per column).
+// width_dots is the number of image columns; data length must equal
+// width_dots * (mode < 32 ? 1 : 3).
+munbyn_error_t munbyn_print_bit_image(munbyn_handle_t handle, uint8_t mode,
+                                      uint16_t width_dots, const uint8_t* data, size_t length);
+
+// GS * x y d1..d(x*y*8) - Define the downloaded bit image.
+// x = width in bytes (1-255), y = height in bytes (1-48); x*y <= 912.
+// length must be x*y*8 (manual pp. 35-36).
+munbyn_error_t munbyn_define_downloaded_bit_image(munbyn_handle_t handle, uint8_t x, uint8_t y,
+                                                  const uint8_t* data, size_t length);
+
+// GS / m - Print the downloaded bit image (m selects scaling 0-3 / 48-51).
+munbyn_error_t munbyn_print_downloaded_bit_image(munbyn_handle_t handle, uint8_t mode);
+
+// FS p n m - Print NV (non-volatile) bit image number n at scaling m.
+munbyn_error_t munbyn_print_nv_bit_image(munbyn_handle_t handle, uint8_t n, uint8_t mode);
+
+// FS q n [xL xH yL yH d1..dk]1..n - Define NV bit image(s).
+// image_data must contain num_images consecutive [xL xH yL yH d...] blocks.
+// Total blocks <=65536 bytes; dimensions x=1..1023, y=1..288 (8-dot units).
+// NOTE: replaces all NV images and resets the printer; use sparingly.
+munbyn_error_t munbyn_define_nv_bit_image(munbyn_handle_t handle, uint8_t num_images,
+                                          const uint8_t* image_data, size_t length);
+
+// --- Page mode ---
+munbyn_error_t munbyn_select_page_mode(munbyn_handle_t handle);       // ESC L
+munbyn_error_t munbyn_select_standard_mode(munbyn_handle_t handle);   // ESC S
+munbyn_error_t munbyn_print_page_mode(munbyn_handle_t handle);        // ESC FF (print page buffer)
+munbyn_error_t munbyn_form_feed(munbyn_handle_t handle);             // FF
+munbyn_error_t munbyn_cancel_page_data(munbyn_handle_t handle);      // CAN
+// ESC W xL xH yL yH dxL dxH dyL dyH - set print area in page mode.
+munbyn_error_t munbyn_set_page_area(munbyn_handle_t handle, uint16_t x, uint16_t y,
+                                    uint16_t dx, uint16_t dy);
+// GS $ nL nH - absolute vertical print position in page mode.
+munbyn_error_t munbyn_set_absolute_vertical_position(munbyn_handle_t handle, uint16_t position);
+// GS \ nL nH - relative vertical print position in page mode.
+munbyn_error_t munbyn_set_relative_vertical_position(munbyn_handle_t handle, int16_t position);
+
+// --- Misc text / position / user-defined characters ---
+
+// ESC J n - print buffer and feed n vertical motion units.
+munbyn_error_t munbyn_print_and_feed_units(munbyn_handle_t handle, uint8_t units);
+// ESC = n - select the peripheral device that receives data (bit0 = printer).
+munbyn_error_t munbyn_set_peripheral_device(munbyn_handle_t handle, uint8_t n);
+// ESC % n - select (n!=0) or cancel (n=0) the user-defined character set.
+munbyn_error_t munbyn_select_user_defined_charset(munbyn_handle_t handle, bool enabled);
+// ESC & y c1 c2 d... - define user-defined characters for codes c1..c2.
+// y=3, codes 32..126; data contains exactly one width+bitmap block per code.
+// Width <=12 for font A, <=9 for font B (manual p. 14).
+munbyn_error_t munbyn_define_user_defined_chars(munbyn_handle_t handle, uint8_t y,
+                                                uint8_t c1, uint8_t c2,
+                                                const uint8_t* data, size_t length);
+// ESC ? n - cancel the user-defined character for code n.
+munbyn_error_t munbyn_cancel_user_defined_char(munbyn_handle_t handle, uint8_t code);
+
+// --- Status & real-time ---
+
+// DLE ENQ n - real-time request to the printer (n=1/2 recover, etc.).
+munbyn_error_t munbyn_realtime_request(munbyn_handle_t handle, uint8_t n);
+// DLE DC4 1 m t - drawer pulse: pin 0/1, on_time 1..8 in 100 ms units.
+munbyn_error_t munbyn_realtime_drawer_pulse(munbyn_handle_t handle, uint8_t pin, uint8_t on_time);
+// GS r n - transmit status (n=1/49 paper sensor, 2/50 drawer). Reads one byte.
+munbyn_error_t munbyn_transmit_status(munbyn_handle_t handle, uint8_t n, uint8_t* out);
+// GS a n - enable/disable Automatic Status Back (ASB) features bitmask.
+munbyn_error_t munbyn_set_asb(munbyn_handle_t handle, uint8_t n);
+// ESC c 3 n - select paper sensor(s) that output paper-end signals.
+munbyn_error_t munbyn_set_paper_end_sensors(munbyn_handle_t handle, uint8_t n);
+// ESC c 4 n - select paper sensor(s) that stop printing.
+munbyn_error_t munbyn_set_stop_print_sensors(munbyn_handle_t handle, uint8_t n);
+// GS ( A - enter hex-dump mode: n=0/48, m=1/49 (manual p. 37).
+// Historical API name retained; this is distinct from munbyn_self_test().
+munbyn_error_t munbyn_execute_test_print(munbyn_handle_t handle, uint8_t n, uint8_t m);
+
+// --- Mechanism, sound, macros ---
+
+// ESC c 5 n - enable (true) or disable (false) the panel buttons (FEED).
+munbyn_error_t munbyn_set_panel_buttons(munbyn_handle_t handle, bool enabled);
+// ESC B n t - sound the buzzer n times, t x 50ms each (MUNBYN-specific).
+munbyn_error_t munbyn_buzzer(munbyn_handle_t handle, uint8_t count, uint8_t duration);
+// ESC C m t n - beeper + alarm light: m beeps, t interval, n mode
+// (0=none, 1=buzzer, 2=light, 3=both) (MUNBYN-specific).
+munbyn_error_t munbyn_buzzer_alarm(munbyn_handle_t handle, uint8_t count, uint8_t interval, uint8_t mode);
+// GS : - start/end macro definition (toggles).
+munbyn_error_t munbyn_macro_define_toggle(munbyn_handle_t handle);
+// GS ^ r t m - execute the macro r times, t wait, m mode.
+munbyn_error_t munbyn_execute_macro(munbyn_handle_t handle, uint8_t times, uint8_t wait, uint8_t mode);
+
+// --- Kanji ---
+// FS ! n - set Kanji print mode(s) (bitmask).
+munbyn_error_t munbyn_set_kanji_mode(munbyn_handle_t handle, uint8_t modes);
+// FS & - select (enter) Kanji character mode.
+munbyn_error_t munbyn_select_kanji(munbyn_handle_t handle);
+// FS . - cancel (exit) Kanji character mode.
+munbyn_error_t munbyn_cancel_kanji(munbyn_handle_t handle);
+// FS S n1 n2 - set left/right Kanji character spacing.
+munbyn_error_t munbyn_set_kanji_spacing(munbyn_handle_t handle, uint8_t left, uint8_t right);
+// FS W n - turn quadruple-size Kanji mode on/off.
+munbyn_error_t munbyn_set_kanji_quad_size(munbyn_handle_t handle, bool enabled);
+
+// --- Network / WiFi (vendor 1F 1B 1F commands) ---
+// NOTE: reverse-engineered from the official PrinterTest tool; not verified on
+// all firmware. Send these over USB — running them over the network link will
+// drop the connection. After setWifi, power-cycle the printer.
+
+// WiFi encryption / key types (index into the tool's "Key Type" dropdown).
+typedef enum {
+    MUNBYN_WIFI_WEP64 = 0,
+    MUNBYN_WIFI_WEP128 = 1,
+    MUNBYN_WIFI_WPA_AES_PSK = 2,
+    MUNBYN_WIFI_WPA_TKIP_PSK = 3,
+    MUNBYN_WIFI_WPA_TKIP_AES_PSK = 4,
+    MUNBYN_WIFI_WPA2_AES_PSK = 5,
+    MUNBYN_WIFI_WPA2_TKIP = 6,
+    MUNBYN_WIFI_WPA2_TKIP_AES_PSK = 7,
+    MUNBYN_WIFI_WPA_WPA2_MIXED = 8,
+} munbyn_wifi_keytype_t;
+
+// 1F 1B 1F B3 <keyt> <ssid> 00 <password> 00 - set WiFi SSID + password
+// (DHCP case: the printer keeps its existing IP mode). Follow with setDhcp(true)
+// + a power-cycle to associate.
+munbyn_error_t munbyn_set_wifi(munbyn_handle_t handle, const char* ssid,
+                               const char* password, munbyn_wifi_keytype_t key_type);
+
+// 1F 1B 1F B4 <ip[4]> <mask[4]> <gateway[4]> <keyt> <ssid> 00 <password> 00 -
+// set WiFi credentials together with a static IP. ip/mask/gateway are 4 octets
+// each in normal order (e.g. {192,168,1,50}). Power-cycle afterwards.
+munbyn_error_t munbyn_set_wifi_static(munbyn_handle_t handle, const char* ssid,
+                                      const char* password, munbyn_wifi_keytype_t key_type,
+                                      const uint8_t ip[4], const uint8_t mask[4],
+                                      const uint8_t gateway[4]);
+// 1F 1B 1F 28 13 14 04 n - enable (true) / disable (false) DHCP (official).
+munbyn_error_t munbyn_set_dhcp(munbyn_handle_t handle, bool enabled);
 
 #ifdef __cplusplus
 }

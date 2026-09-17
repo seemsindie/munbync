@@ -20,6 +20,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <errno.h>
+#include <poll.h>
 #endif
 
 #define ESC 0x1B
@@ -96,6 +97,8 @@ static munbyn_error_t open_serial_port(munbyn_handle_t handle)
     struct termios options;
     if (tcgetattr(handle->transport.serial.fd, &options) != 0)
     {
+        close(handle->transport.serial.fd);
+        handle->transport.serial.fd = -1;
         return MUNBYN_ERROR_INVALID_HANDLE;
     }
 
@@ -234,29 +237,40 @@ munbyn_error_t munbyn_open(const munbyn_connection_params_t* params, munbyn_hand
 
     switch (params->type) {
         case MUNBYN_CONNECTION_USB:
-            strncpy(printer->transport.usb.device_path, params->config.usb.device_path, 
-                    sizeof(printer->transport.usb.device_path) - 1);
+            memcpy(printer->transport.usb.device_path, params->config.usb.device_path,
+                    sizeof(printer->transport.usb.device_path));
+            printer->transport.usb.device_path[sizeof(printer->transport.usb.device_path) - 1] = '\0';
 #ifndef _WIN32
             result = open_usb_port(printer);
+#else
+            // Windows transport I/O is not implemented; fail explicitly rather
+            // than reporting a silent success that drops all data.
+            result = MUNBYN_ERROR_NOT_INITIALIZED;
 #endif
             break;
 
         case MUNBYN_CONNECTION_SERIAL:
-            strncpy(printer->transport.serial.port_name, params->config.serial.port_name, 
-                    sizeof(printer->transport.serial.port_name) - 1);
+            memcpy(printer->transport.serial.port_name, params->config.serial.port_name,
+                    sizeof(printer->transport.serial.port_name));
+            printer->transport.serial.port_name[sizeof(printer->transport.serial.port_name) - 1] = '\0';
             printer->transport.serial.baud_rate = params->config.serial.baud_rate;
 #ifndef _WIN32
             result = open_serial_port(printer);
+#else
+            result = MUNBYN_ERROR_NOT_INITIALIZED;
 #endif
             break;
 
         case MUNBYN_CONNECTION_NETWORK:
-            strncpy(printer->transport.network.ip_address, params->config.network.ip_address, 
-                    sizeof(printer->transport.network.ip_address) - 1);
+            memcpy(printer->transport.network.ip_address, params->config.network.ip_address,
+                    sizeof(printer->transport.network.ip_address));
+            printer->transport.network.ip_address[sizeof(printer->transport.network.ip_address) - 1] = '\0';
             printer->transport.network.port = params->config.network.port;
             printer->transport.network.timeout_ms = params->config.network.timeout_ms;
 #ifndef _WIN32
             result = open_network_connection(printer);
+#else
+            result = MUNBYN_ERROR_NOT_INITIALIZED;
 #endif
             break;
             
@@ -398,14 +412,24 @@ munbyn_error_t munbyn_write_data(munbyn_handle_t handle, const uint8_t* data, si
         return MUNBYN_ERROR_INVALID_HANDLE;
     }
 
-    ssize_t bytes_written;
-    if (handle->transport_type == MUNBYN_CONNECTION_NETWORK) {
-        bytes_written = send(fd, data, length, 0);
-    } else {
-        bytes_written = write(fd, data, length);
-    }
-    if (bytes_written != (ssize_t)length) {
-        return MUNBYN_ERROR_COMMUNICATION;
+    size_t offset = 0;
+    while (offset < length) {
+        ssize_t written;
+        if (handle->transport_type == MUNBYN_CONNECTION_NETWORK) {
+#ifdef MSG_NOSIGNAL
+            written = send(fd, data + offset, length - offset, MSG_NOSIGNAL);
+#else
+            written = send(fd, data + offset, length - offset, 0);
+#endif
+        } else {
+            written = write(fd, data + offset, length - offset);
+        }
+        if (written < 0 && errno == EINTR) continue;
+        if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return MUNBYN_ERROR_TIMEOUT;
+        }
+        if (written <= 0) return MUNBYN_ERROR_COMMUNICATION;
+        offset += (size_t)written;
     }
 #endif
 
@@ -447,17 +471,32 @@ munbyn_error_t munbyn_read_data(munbyn_handle_t handle, uint8_t* buffer, size_t 
         return MUNBYN_ERROR_INVALID_HANDLE;
     }
 
-    ssize_t result;
-    if (handle->transport_type == MUNBYN_CONNECTION_NETWORK) {
-        result = recv(fd, buffer, buffer_size, 0);
-    } else {
-        result = read(fd, buffer, buffer_size);
-    }
-    if (result < 0) {
-        *bytes_read = 0;
+    *bytes_read = 0;
+    // A one-way USB/serial transport must not block status queries forever.
+    int timeout_ms = handle->transport_type == MUNBYN_CONNECTION_NETWORK
+        ? handle->transport.network.timeout_ms : 1000;
+    if (timeout_ms <= 0) timeout_ms = 1000;
+    struct pollfd pending = {fd, POLLIN, 0};
+    int ready;
+    do { ready = poll(&pending, 1, timeout_ms); } while (ready < 0 && errno == EINTR);
+    if (ready == 0) return MUNBYN_ERROR_TIMEOUT;
+    if (ready < 0 || (pending.revents & (POLLERR | POLLNVAL))) {
         return MUNBYN_ERROR_COMMUNICATION;
     }
 
+    ssize_t result;
+    do {
+        result = handle->transport_type == MUNBYN_CONNECTION_NETWORK
+            ? recv(fd, buffer, buffer_size, 0) : read(fd, buffer, buffer_size);
+    } while (result < 0 && errno == EINTR);
+    if (result < 0) {
+        return (errno == EAGAIN || errno == EWOULDBLOCK)
+            ? MUNBYN_ERROR_TIMEOUT : MUNBYN_ERROR_COMMUNICATION;
+    }
+    if (result == 0) {
+        return handle->transport_type == MUNBYN_CONNECTION_NETWORK
+            ? MUNBYN_ERROR_COMMUNICATION : MUNBYN_ERROR_TIMEOUT;
+    }
     *bytes_read = (size_t)result;
 #endif
 
@@ -466,26 +505,22 @@ munbyn_error_t munbyn_read_data(munbyn_handle_t handle, uint8_t* buffer, size_t 
 
 // Basic printer operations implementation
 
-munbyn_error_t munbyn_get_status(munbyn_handle_t handle, munbyn_status_t* status)
+// Issue a single real-time status request (DLE EOT n) and read back one byte.
+// n selects the status group: 1=printer, 2=off-line cause, 3=error, 4=paper.
+// Returns MUNBYN_ERROR_TIMEOUT if the printer sends nothing (e.g. one-way
+// transports), so the caller never mistakes silence for a valid response.
+static munbyn_error_t query_realtime_status(munbyn_handle_t handle, uint8_t n, uint8_t* out)
 {
-    if (!handle || !handle->initialized || !status) {
-        return MUNBYN_ERROR_INVALID_PARAMETER;
-    }
-
-    // Clear the status structure
-    memset(status, 0, sizeof(munbyn_status_t));
-
-    // DLE EOT 1 - Request printer status
-    uint8_t status_cmd[] = {0x10, 0x04, 0x01};
-    uint8_t response[4] = {0};
+    uint8_t cmd[3] = {0x10, 0x04, n}; // DLE EOT n
+    uint8_t response[1] = {0};
     size_t bytes_read = 0;
 
-    munbyn_error_t result = munbyn_write_data(handle, status_cmd, sizeof(status_cmd));
+    munbyn_error_t result = munbyn_write_data(handle, cmd, sizeof(cmd));
     if (result != MUNBYN_OK) {
         return result;
     }
 
-    // Small delay to allow printer to respond
+    // Small delay to allow the printer to respond.
 #ifndef _WIN32
     struct timeval timeout = {0, 100000}; // 100ms
     select(0, NULL, NULL, NULL, &timeout);
@@ -495,32 +530,69 @@ munbyn_error_t munbyn_get_status(munbyn_handle_t handle, munbyn_status_t* status
 
     result = munbyn_read_data(handle, response, sizeof(response), &bytes_read);
     if (result != MUNBYN_OK) {
+        return result; // includes MUNBYN_ERROR_TIMEOUT on a 0-byte read
+    }
+    if (bytes_read == 0) {
+        return MUNBYN_ERROR_TIMEOUT;
+    }
+
+    if ((response[0] & 0x93) != 0x12) {
+        return MUNBYN_ERROR_COMMUNICATION;
+    }
+    *out = response[0];
+    return MUNBYN_OK;
+}
+
+munbyn_error_t munbyn_get_status(munbyn_handle_t handle, munbyn_status_t* status)
+{
+    if (!handle || !handle->initialized || !status) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    memset(status, 0, sizeof(munbyn_status_t));
+
+    munbyn_status_t complete = {0};
+    bool offline_error = false;
+    uint8_t b = 0;
+    munbyn_error_t result;
+
+    // DLE EOT 1 - printer/transmission status: bit3 (0x08) set => off-line.
+    result = query_realtime_status(handle, 1, &b);
+    if (result != MUNBYN_OK) {
         return result;
     }
+    complete.online = (b & 0x08) == 0;
 
-    if (bytes_read > 0) {
-        uint8_t status_byte = response[0];
-        
-        // Parse status bits according to ESC/POS specification
-        // For ITPP047, let's use more standard interpretations
-        status->online = (status_byte & 0x08) == 0;       // Bit 3: 0=online, 1=offline
-        status->paper_present = (status_byte & 0x20) == 0; // Bit 5: 0=paper present, 1=paper out  
-        status->cover_closed = (status_byte & 0x04) == 0;  // Bit 2: 0=cover closed, 1=cover open
-        status->error_occurred = (status_byte & 0x40) != 0; // Bit 6: 1=error occurred
-        status->cut_error = false;                         // Not available in basic status
-        status->recoverable_error = (status_byte & 0x08) != 0; // Based on offline status
-        status->unrecoverable_error = (status_byte & 0x40) != 0; // Same as error_occurred
-    } else {
-        // If no response received, assume default safe values
-        status->online = true;
-        status->paper_present = true;
-        status->cover_closed = true;
-        status->error_occurred = false;
-        status->cut_error = false;
-        status->recoverable_error = false;
-        status->unrecoverable_error = false;
+    // DLE EOT 2 - off-line cause status: bit2 (0x04) set => cover open.
+    result = query_realtime_status(handle, 2, &b);
+    if (result != MUNBYN_OK) {
+        return result;
     }
+    complete.cover_closed = (b & 0x04) == 0;
+    offline_error = (b & 0x40) != 0;
 
+    // DLE EOT 3 - error status: bit3 cutter error, bit5 unrecoverable,
+    // bit6 recoverable (auto-recoverable) error.
+    result = query_realtime_status(handle, 3, &b);
+    if (result != MUNBYN_OK) {
+        return result;
+    }
+    complete.cut_error = (b & 0x08) != 0;
+    complete.unrecoverable_error = (b & 0x20) != 0;
+    complete.recoverable_error = (b & 0x40) != 0;
+
+    // DLE EOT 4 - paper roll sensor status: bits5,6 (0x60) set => paper end.
+    result = query_realtime_status(handle, 4, &b);
+    if (result != MUNBYN_OK) {
+        return result;
+    }
+    complete.paper_present = (b & 0x60) == 0;
+
+    complete.error_occurred = offline_error || complete.cut_error || complete.unrecoverable_error ||
+                             complete.recoverable_error || !complete.paper_present ||
+                             !complete.cover_closed;
+
+    *status = complete;
     return MUNBYN_OK;
 }
 
@@ -659,6 +731,25 @@ munbyn_error_t munbyn_print_and_cut(munbyn_handle_t handle, const char* text, mu
     return munbyn_cut_paper(handle, cut_mode);
 }
 
+// System/Diagnostic commands implementation
+
+munbyn_error_t munbyn_self_test(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // Proprietary self-test command: 1F 1B 1F 67
+    // 1F = ASCII Unit Separator (31 decimal)
+    // 1B = ESC (27 decimal)
+    // 1F = ASCII Unit Separator (31 decimal)
+    // 67 = ASCII 'g' (103 decimal)
+    // This appears to be: Unit Separator + ESC + Unit Separator + 'g'
+    uint8_t selftest_cmd[] = {0x1F, 0x1B, 0x1F, 0x67};
+
+    return munbyn_write_data(handle, selftest_cmd, sizeof(selftest_cmd));
+}
+
 // Text control commands implementation
 
 munbyn_error_t munbyn_line_feed(munbyn_handle_t handle)
@@ -710,7 +801,7 @@ munbyn_error_t munbyn_set_horizontal_tab_positions(munbyn_handle_t handle, const
 
     // Validate ascending order and range 1..255
     for (size_t i = 0; i < count; i++) {
-        if (positions[i] < 1 || positions[i] > 255) {
+        if (positions[i] < 1) {
             return MUNBYN_ERROR_INVALID_PARAMETER;
         }
         if (i > 0 && positions[i] <= positions[i - 1]) {
@@ -1492,7 +1583,17 @@ munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t typ
                 return MUNBYN_ERROR_INVALID_PARAMETER;
             }
             break;
-            
+
+        case MUNBYN_BARCODE_GS1_128:
+        case MUNBYN_BARCODE_GS1_DATABAR_OMNI:
+        case MUNBYN_BARCODE_GS1_DATABAR_TRUNCATED:
+        case MUNBYN_BARCODE_GS1_DATABAR_LIMITED:
+        case MUNBYN_BARCODE_GS1_DATABAR_EXPANDED:
+            if (data_len < 1 || data_len > 255) {
+                return MUNBYN_ERROR_INVALID_PARAMETER;
+            }
+            break;
+
         default:
             return MUNBYN_ERROR_INVALID_PARAMETER;
     }
@@ -1500,10 +1601,9 @@ munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t typ
     uint8_t* cmd;
     size_t cmd_size;
     
-    // CODE93 and CODE128 use method 2 (GS k m n d1...dn)
-    // According to reference manual: method 2 for barcode types 65-73
-    // All other barcodes use method 1 (GS k m d1...dk NUL)
-    if (type == MUNBYN_BARCODE_CODE93 || type == MUNBYN_BARCODE_CODE128) {
+    // CODE93/CODE128 and the GS1 family (74-78) use method 2 (GS k m n d1...dn,
+    // function type B). The legacy types (0-6) use method 1 (GS k m d1...dk NUL).
+    if (type >= MUNBYN_BARCODE_CODE93) {
         // Method 2: GS k m n d1...dn
         cmd_size = 4 + data_len;  // 3 (command) + 1 (length) + data_len
         cmd = malloc(cmd_size);
@@ -1538,9 +1638,110 @@ munbyn_error_t munbyn_print_barcode(munbyn_handle_t handle, munbyn_barcode_t typ
     }
     
     munbyn_error_t result = munbyn_write_data(handle, cmd, cmd_size);
-    
+
     free(cmd);
     return result;
+}
+
+// ESC/POS 2D extensions; support depends on firmware (absent from the bundled manual).
+
+munbyn_error_t munbyn_print_qr(munbyn_handle_t handle, const char* data,
+                               uint8_t module_size, munbyn_qr_ec_t ec_level)
+{
+    if (!handle || !handle->initialized || !data) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    size_t data_len = strlen(data);
+    if (data_len == 0) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    // QR symbol data capacity upper bound; the store length field is 16-bit.
+    if (data_len > 7089) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if (module_size < 1 || module_size > 16) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if (ec_level < MUNBYN_QR_EC_L || ec_level > MUNBYN_QR_EC_H) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    munbyn_error_t result;
+
+    // 1) Select model 2: GS ( k 04 00 31 41 32 00
+    uint8_t model[] = {GS, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00};
+    result = munbyn_write_data(handle, model, sizeof(model));
+    if (result != MUNBYN_OK) return result;
+
+    // 2) Module size: GS ( k 03 00 31 43 n
+    uint8_t size_cmd[] = {GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, module_size};
+    result = munbyn_write_data(handle, size_cmd, sizeof(size_cmd));
+    if (result != MUNBYN_OK) return result;
+
+    // 3) Error correction level: GS ( k 03 00 31 45 n
+    uint8_t ec_cmd[] = {GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, (uint8_t)ec_level};
+    result = munbyn_write_data(handle, ec_cmd, sizeof(ec_cmd));
+    if (result != MUNBYN_OK) return result;
+
+    // 4) Store the data: GS ( k pL pH 31 50 30 d1..dk  (pL+pH*256 = data_len+3)
+    size_t store_len = data_len + 3;
+    uint8_t store_hdr[] = {GS, 0x28, 0x6B,
+                           (uint8_t)(store_len & 0xff), (uint8_t)((store_len >> 8) & 0xff),
+                           0x31, 0x50, 0x30};
+    result = munbyn_write_data(handle, store_hdr, sizeof(store_hdr));
+    if (result != MUNBYN_OK) return result;
+    result = munbyn_write_data(handle, (const uint8_t*)data, data_len);
+    if (result != MUNBYN_OK) return result;
+
+    // 5) Print the symbol: GS ( k 03 00 31 51 30
+    uint8_t print_cmd[] = {GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30};
+    return munbyn_write_data(handle, print_cmd, sizeof(print_cmd));
+}
+
+munbyn_error_t munbyn_print_pdf417(munbyn_handle_t handle, const char* data,
+                                   uint8_t columns, uint8_t ec_level)
+{
+    if (!handle || !handle->initialized || !data) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    size_t data_len = strlen(data);
+    if (data_len == 0 || data_len > 65532) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if (columns > 30) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if (ec_level > 8) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    munbyn_error_t result;
+
+    // 1) Number of columns: GS ( k 03 00 30 41 n  (n=0 auto, 1-30)
+    uint8_t cols[] = {GS, 0x28, 0x6B, 0x03, 0x00, 0x30, 0x41, columns};
+    result = munbyn_write_data(handle, cols, sizeof(cols));
+    if (result != MUNBYN_OK) return result;
+
+    // 2) Error correction by level: GS ( k 04 00 30 45 30 (0x30+level)
+    uint8_t ec[] = {GS, 0x28, 0x6B, 0x04, 0x00, 0x30, 0x45, 0x30, (uint8_t)(0x30 + ec_level)};
+    result = munbyn_write_data(handle, ec, sizeof(ec));
+    if (result != MUNBYN_OK) return result;
+
+    // 3) Store the data: GS ( k pL pH 30 50 30 d1..dk  (pL+pH*256 = data_len+3)
+    size_t store_len = data_len + 3;
+    uint8_t store_hdr[] = {GS, 0x28, 0x6B,
+                           (uint8_t)(store_len & 0xff), (uint8_t)((store_len >> 8) & 0xff),
+                           0x30, 0x50, 0x30};
+    result = munbyn_write_data(handle, store_hdr, sizeof(store_hdr));
+    if (result != MUNBYN_OK) return result;
+    result = munbyn_write_data(handle, (const uint8_t*)data, data_len);
+    if (result != MUNBYN_OK) return result;
+
+    // 4) Print the symbol: GS ( k 03 00 30 51 30
+    uint8_t print_cmd[] = {GS, 0x28, 0x6B, 0x03, 0x00, 0x30, 0x51, 0x30};
+    return munbyn_write_data(handle, print_cmd, sizeof(print_cmd));
 }
 
 // Raster bit image printing (GS v 0 m xL xH yL yH d1..dk)
@@ -1594,4 +1795,492 @@ munbyn_error_t munbyn_print_raster_image(
     }
 
     return munbyn_write_data(handle, bitmap, total_bytes);
+}
+
+// --- Other bit-image commands ---
+
+munbyn_error_t munbyn_print_bit_image(munbyn_handle_t handle, uint8_t mode,
+                                      uint16_t width_dots, const uint8_t* data, size_t length)
+{
+    if (!handle || !handle->initialized || !data || width_dots == 0 || width_dots > 1023 || length == 0) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if (mode != 0 && mode != 1 && mode != 32 && mode != 33) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    size_t bytes_per_col = (mode < 32) ? 1 : 3;
+    if (length != (size_t)width_dots * bytes_per_col) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // ESC * m nL nH
+    uint8_t header[] = {ESC, 0x2A, mode,
+                        (uint8_t)(width_dots & 0xFF), (uint8_t)((width_dots >> 8) & 0xFF)};
+    munbyn_error_t result = munbyn_write_data(handle, header, sizeof(header));
+    if (result != MUNBYN_OK) {
+        return result;
+    }
+    return munbyn_write_data(handle, data, length);
+}
+
+munbyn_error_t munbyn_define_downloaded_bit_image(munbyn_handle_t handle, uint8_t x, uint8_t y,
+                                                  const uint8_t* data, size_t length)
+{
+    if (!handle || !handle->initialized || !data) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    // x: 1-255, y: 1-48 per spec; data must be exactly x*y*8 bytes.
+    if (x < 1 || y < 1 || y > 48 || (size_t)x * y > 912) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if (length != (size_t)x * (size_t)y * 8) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // GS * x y
+    uint8_t header[] = {GS, 0x2A, x, y};
+    munbyn_error_t result = munbyn_write_data(handle, header, sizeof(header));
+    if (result != MUNBYN_OK) {
+        return result;
+    }
+    return munbyn_write_data(handle, data, length);
+}
+
+munbyn_error_t munbyn_print_downloaded_bit_image(munbyn_handle_t handle, uint8_t mode)
+{
+    if (!handle || !handle->initialized) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if (!(mode <= 3 || (mode >= 48 && mode <= 51))) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    // GS / m
+    uint8_t cmd[] = {GS, 0x2F, mode};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_print_nv_bit_image(munbyn_handle_t handle, uint8_t n, uint8_t mode)
+{
+    if (!handle || !handle->initialized || n == 0) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if (!(mode <= 3 || (mode >= 48 && mode <= 51))) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    // FS p n m
+    uint8_t cmd[] = {FS, 0x70, n, mode};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_define_nv_bit_image(munbyn_handle_t handle, uint8_t num_images,
+                                          const uint8_t* image_data, size_t length)
+{
+    if (!handle || !handle->initialized || !image_data || num_images == 0 || length == 0) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    // Validate every block before writing anything (manual pp. 32-34).
+    if (length > 65536) return MUNBYN_ERROR_INVALID_PARAMETER;
+    size_t offset = 0;
+    for (unsigned int i = 0; i < num_images; ++i) {
+        if (length - offset < 4) return MUNBYN_ERROR_INVALID_PARAMETER;
+        size_t x = image_data[offset] | ((size_t)image_data[offset + 1] << 8);
+        size_t y = image_data[offset + 2] | ((size_t)image_data[offset + 3] << 8);
+        offset += 4;
+        if (x < 1 || x > 1023 || y < 1 || y > 288 || x * y * 8 > length - offset) {
+            return MUNBYN_ERROR_INVALID_PARAMETER;
+        }
+        offset += x * y * 8;
+    }
+    if (offset != length) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // FS q n  (followed by [xL xH yL yH d...] blocks)
+    uint8_t header[] = {FS, 0x71, num_images};
+    munbyn_error_t result = munbyn_write_data(handle, header, sizeof(header));
+    if (result != MUNBYN_OK) {
+        return result;
+    }
+    return munbyn_write_data(handle, image_data, length);
+}
+
+// --- Page mode ---
+
+munbyn_error_t munbyn_select_page_mode(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x4C}; // ESC L
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_select_standard_mode(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x53}; // ESC S
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_print_page_mode(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x0C}; // ESC FF
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_form_feed(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {0x0C}; // FF
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_cancel_page_data(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {0x18}; // CAN
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_set_page_area(munbyn_handle_t handle, uint16_t x, uint16_t y,
+                                    uint16_t dx, uint16_t dy)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // ESC W xL xH yL yH dxL dxH dyL dyH
+    uint8_t cmd[] = {ESC, 0x57,
+                     (uint8_t)(x & 0xFF), (uint8_t)((x >> 8) & 0xFF),
+                     (uint8_t)(y & 0xFF), (uint8_t)((y >> 8) & 0xFF),
+                     (uint8_t)(dx & 0xFF), (uint8_t)((dx >> 8) & 0xFF),
+                     (uint8_t)(dy & 0xFF), (uint8_t)((dy >> 8) & 0xFF)};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_set_absolute_vertical_position(munbyn_handle_t handle, uint16_t position)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // GS $ nL nH
+    uint8_t cmd[] = {GS, 0x24, (uint8_t)(position & 0xFF), (uint8_t)((position >> 8) & 0xFF)};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_set_relative_vertical_position(munbyn_handle_t handle, int16_t position)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint16_t value = (position >= 0) ? (uint16_t)position : (uint16_t)(65536 + position);
+    // GS \ nL nH
+    uint8_t cmd[] = {GS, 0x5C, (uint8_t)(value & 0xFF), (uint8_t)((value >> 8) & 0xFF)};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+// --- Misc text / position / user-defined characters ---
+
+munbyn_error_t munbyn_print_and_feed_units(munbyn_handle_t handle, uint8_t units)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x4A, units}; // ESC J n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_set_peripheral_device(munbyn_handle_t handle, uint8_t n)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x3D, n}; // ESC = n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_select_user_defined_charset(munbyn_handle_t handle, bool enabled)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x25, enabled ? 1 : 0}; // ESC % n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_define_user_defined_chars(munbyn_handle_t handle, uint8_t y,
+                                                uint8_t c1, uint8_t c2,
+                                                const uint8_t* data, size_t length)
+{
+    if (!handle || !handle->initialized || !data || length == 0) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    // Use the conservative 0x20..0x7e range in the manual details (p. 14).
+    if (y != 3 || c1 > c2 || c1 < 32 || c2 > 126) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    size_t offset = 0;
+    unsigned int max_width = (handle->current_font == MUNBYN_FONT_B ||
+                              handle->current_font == MUNBYN_FONT_B_ALT) ? 9 : 12;
+    for (unsigned int code = c1; code <= c2; ++code) {
+        if (offset >= length) return MUNBYN_ERROR_INVALID_PARAMETER;
+        unsigned int width = data[offset++];
+        if (width > max_width || (size_t)y * width > length - offset) {
+            return MUNBYN_ERROR_INVALID_PARAMETER;
+        }
+        offset += (size_t)y * width;
+    }
+    if (offset != length) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // ESC & y c1 c2
+    uint8_t header[] = {ESC, 0x26, y, c1, c2};
+    munbyn_error_t result = munbyn_write_data(handle, header, sizeof(header));
+    if (result != MUNBYN_OK) {
+        return result;
+    }
+    return munbyn_write_data(handle, data, length);
+}
+
+munbyn_error_t munbyn_cancel_user_defined_char(munbyn_handle_t handle, uint8_t code)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    if (code < 32 || code > 126) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x3F, code}; // ESC ? n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+// --- Status & real-time ---
+
+munbyn_error_t munbyn_realtime_request(munbyn_handle_t handle, uint8_t n)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    if (n != 1 && n != 2) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {0x10, 0x05, n}; // DLE ENQ n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_realtime_drawer_pulse(munbyn_handle_t handle, uint8_t pin, uint8_t on_time)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    if (pin > 1 || on_time < 1 || on_time > 8) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // DLE DC4 1 m t; t is in 100 ms units (manual pp. 10-11).
+    uint8_t cmd[] = {0x10, 0x14, 0x01, pin, on_time};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_transmit_status(munbyn_handle_t handle, uint8_t n, uint8_t* out)
+{
+    if (!handle || !handle->initialized || !out) return MUNBYN_ERROR_INVALID_PARAMETER;
+
+    if (n != 1 && n != 2 && n != 49 && n != 50) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {GS, 0x72, n}; // GS r n
+    munbyn_error_t result = munbyn_write_data(handle, cmd, sizeof(cmd));
+    if (result != MUNBYN_OK) return result;
+
+#ifndef _WIN32
+    struct timeval timeout = {0, 100000}; // 100ms
+    select(0, NULL, NULL, NULL, &timeout);
+#else
+    Sleep(100);
+#endif
+
+    uint8_t response[1] = {0};
+    size_t bytes_read = 0;
+    result = munbyn_read_data(handle, response, sizeof(response), &bytes_read);
+    if (result != MUNBYN_OK) return result;
+    if (bytes_read == 0) return MUNBYN_ERROR_TIMEOUT;
+
+    *out = response[0];
+    return MUNBYN_OK;
+}
+
+munbyn_error_t munbyn_set_asb(munbyn_handle_t handle, uint8_t n)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {GS, 0x61, n}; // GS a n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_set_paper_end_sensors(munbyn_handle_t handle, uint8_t n)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x63, 0x33, n}; // ESC c 3 n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_set_stop_print_sensors(munbyn_handle_t handle, uint8_t n)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {ESC, 0x63, 0x34, n}; // ESC c 4 n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_execute_test_print(munbyn_handle_t handle, uint8_t n, uint8_t m)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    if ((n != 0 && n != 48) || (m != 1 && m != 49)) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // GS ( A: enter hex-dump mode, not a generic test pattern (manual p. 37).
+    uint8_t cmd[] = {GS, 0x28, 0x41, 0x02, 0x00, n, m};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+// --- Mechanism, sound, macros ---
+
+munbyn_error_t munbyn_set_panel_buttons(munbyn_handle_t handle, bool enabled)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // ESC c 5 n - LSB 0 = enable buttons, 1 = disable.
+    uint8_t cmd[] = {ESC, 0x63, 0x35, enabled ? 0 : 1};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_buzzer(munbyn_handle_t handle, uint8_t count, uint8_t duration)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // ESC B n t (MUNBYN-specific). Valid ranges per manual: 1<=n<=9, 1<=t<=9.
+    if (count < 1 || count > 9 || duration < 1 || duration > 9) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    uint8_t cmd[] = {ESC, 0x42, count, duration};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_buzzer_alarm(munbyn_handle_t handle, uint8_t count, uint8_t interval, uint8_t mode)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    if (count < 1 || count > 20 || interval < 1 || interval > 20 || mode > 3) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    // ESC C m t n (MUNBYN-specific): m beeps, t interval, n mode.
+    uint8_t cmd[] = {ESC, 0x43, count, interval, mode};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_macro_define_toggle(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {GS, 0x3A}; // GS :
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_execute_macro(munbyn_handle_t handle, uint8_t times, uint8_t wait, uint8_t mode)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    if (mode > 1) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {GS, 0x5E, times, wait, mode}; // GS ^ r t m
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+// --- Kanji ---
+
+munbyn_error_t munbyn_set_kanji_mode(munbyn_handle_t handle, uint8_t modes)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {FS, 0x21, modes}; // FS ! n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_select_kanji(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {FS, 0x26}; // FS &
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_cancel_kanji(munbyn_handle_t handle)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {FS, 0x2E}; // FS .
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_set_kanji_spacing(munbyn_handle_t handle, uint8_t left, uint8_t right)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {FS, 0x53, left, right}; // FS S n1 n2
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+munbyn_error_t munbyn_set_kanji_quad_size(munbyn_handle_t handle, bool enabled)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    uint8_t cmd[] = {FS, 0x57, enabled ? 1 : 0}; // FS W n
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
+}
+
+// --- Network / WiFi (vendor) ---
+
+munbyn_error_t munbyn_set_wifi(munbyn_handle_t handle, const char* ssid,
+                               const char* password, munbyn_wifi_keytype_t key_type)
+{
+    if (!handle || !handle->initialized || !ssid || !password) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    size_t ssid_len = strlen(ssid);
+    size_t pass_len = strlen(password);
+    // SSID up to 32 chars; WPA passphrase up to 63 (+NUL); WEP keys shorter.
+    if (ssid_len == 0 || ssid_len > 32 || pass_len > 64) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if ((unsigned int)key_type > MUNBYN_WIFI_WPA_WPA2_MIXED) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // 1F 1B 1F B3 <keyt> <ssid> 00 <password> 00
+    size_t cmd_size = 5 + ssid_len + 1 + pass_len + 1;
+    uint8_t* cmd = malloc(cmd_size);
+    if (!cmd) {
+        return MUNBYN_ERROR_BUFFER_OVERFLOW;
+    }
+    size_t i = 0;
+    cmd[i++] = 0x1F;
+    cmd[i++] = 0x1B;
+    cmd[i++] = 0x1F;
+    cmd[i++] = 0xB3;
+    cmd[i++] = (uint8_t)key_type;
+    memcpy(&cmd[i], ssid, ssid_len);
+    i += ssid_len;
+    cmd[i++] = 0x00;
+    memcpy(&cmd[i], password, pass_len);
+    i += pass_len;
+    cmd[i++] = 0x00;
+
+    munbyn_error_t result = munbyn_write_data(handle, cmd, cmd_size);
+    free(cmd);
+    return result;
+}
+
+munbyn_error_t munbyn_set_wifi_static(munbyn_handle_t handle, const char* ssid,
+                                      const char* password, munbyn_wifi_keytype_t key_type,
+                                      const uint8_t ip[4], const uint8_t mask[4],
+                                      const uint8_t gateway[4])
+{
+    if (!handle || !handle->initialized || !ssid || !password || !ip || !mask || !gateway) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    size_t ssid_len = strlen(ssid);
+    size_t pass_len = strlen(password);
+    if (ssid_len == 0 || ssid_len > 32 || pass_len > 64) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+    if ((unsigned int)key_type > MUNBYN_WIFI_WPA_WPA2_MIXED) {
+        return MUNBYN_ERROR_INVALID_PARAMETER;
+    }
+
+    // 1F 1B 1F B4 <ip[4]> <mask[4]> <gateway[4]> <keyt> <ssid> 00 <password> 00
+    size_t cmd_size = 4 + 12 + 1 + ssid_len + 1 + pass_len + 1;
+    uint8_t* cmd = malloc(cmd_size);
+    if (!cmd) {
+        return MUNBYN_ERROR_BUFFER_OVERFLOW;
+    }
+    size_t i = 0;
+    cmd[i++] = 0x1F;
+    cmd[i++] = 0x1B;
+    cmd[i++] = 0x1F;
+    cmd[i++] = 0xB4;
+    for (int j = 0; j < 4; j++) cmd[i++] = ip[j];
+    for (int j = 0; j < 4; j++) cmd[i++] = mask[j];
+    for (int j = 0; j < 4; j++) cmd[i++] = gateway[j];
+    cmd[i++] = (uint8_t)key_type;
+    memcpy(&cmd[i], ssid, ssid_len);
+    i += ssid_len;
+    cmd[i++] = 0x00;
+    memcpy(&cmd[i], password, pass_len);
+    i += pass_len;
+    cmd[i++] = 0x00;
+
+    munbyn_error_t result = munbyn_write_data(handle, cmd, cmd_size);
+    free(cmd);
+    return result;
+}
+
+munbyn_error_t munbyn_set_dhcp(munbyn_handle_t handle, bool enabled)
+{
+    if (!handle || !handle->initialized) return MUNBYN_ERROR_INVALID_PARAMETER;
+    // 1F 1B 1F 28 13 14 04 n  (n=0 DHCP on, 1 off)
+    uint8_t cmd[] = {0x1F, 0x1B, 0x1F, 0x28, 0x13, 0x14, 0x04, enabled ? 0 : 1};
+    return munbyn_write_data(handle, cmd, sizeof(cmd));
 }
